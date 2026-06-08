@@ -1,10 +1,14 @@
 import { createRoute, useNavigate, Link } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
 import { signOut } from '../lib/auth';
 import { useWallet } from '../hooks/use-wallet';
 import { format } from '@phonara/money';
+import { WelcomeModal } from '../components/WelcomeModal';
+import { DailyClaimCard } from '../components/DailyClaimCard';
+import { RouletteCard } from '../components/RouletteCard';
+import { MissionsCard } from '../components/MissionsCard';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -16,12 +20,24 @@ function DashboardPage() {
   const { session, loading: authLoading } = useAuth();
   const { wallet, loading: walletLoading, error } = useWallet();
   const navigate = useNavigate();
+  const [showWelcome, setShowWelcome] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !session) {
       void navigate({ to: '/login' });
     }
   }, [session, authLoading, navigate]);
+
+  // Show welcome modal for new users (no wallet balance yet)
+  useEffect(() => {
+    if (!walletLoading && wallet) {
+      const isNew =
+        wallet.phon_available === '0.000000' &&
+        wallet.usdt_available === '0.000000' &&
+        wallet.krw_available === '0';
+      if (isNew) setShowWelcome(true);
+    }
+  }, [wallet, walletLoading]);
 
   async function handleSignOut() {
     await signOut();
@@ -38,6 +54,10 @@ function DashboardPage() {
 
   return (
     <div className="shell">
+      {showWelcome && (
+        <WelcomeModal onDismiss={() => setShowWelcome(false)} />
+      )}
+
       <div className="dashboard">
         <header className="dash-header">
           <div className="dash-logo">
@@ -70,6 +90,21 @@ function DashboardPage() {
               <WalletCard currency="KRW"  available={wallet.krw_available}  locked={wallet.krw_locked}  color="#a78bfa" />
             </div>
           )}
+        </section>
+
+        {/* Phase 2: Retention Section */}
+        <section className="retention-section">
+          <h2 className="section-title">
+            🏆 보상 센터
+            <span className="section-sub">매일 출석하고 룰렛을 돌려 PHON을 모으세요</span>
+          </h2>
+          <div className="retention-grid">
+            <DailyClaimCard />
+            <RouletteCard />
+          </div>
+          <div className="retention-missions">
+            <MissionsCard />
+          </div>
         </section>
 
         <section className="quick-section">

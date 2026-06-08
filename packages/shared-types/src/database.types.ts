@@ -170,6 +170,244 @@ export type Database = {
           },
         ]
       }
+      daily_claims: {
+        Row: {
+          claimed_date: string
+          created_at: string
+          id: string
+          ledger_entry_id: string | null
+          phon_awarded: string
+          streak_day: number
+          user_id: string
+        }
+        Insert: {
+          claimed_date: string
+          created_at?: string
+          id?: string
+          ledger_entry_id?: string | null
+          phon_awarded: string
+          streak_day?: number
+          user_id: string
+        }
+        Update: {
+          claimed_date?: string
+          created_at?: string
+          id?: string
+          ledger_entry_id?: string | null
+          phon_awarded?: string
+          streak_day?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_claims_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      missions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          ledger_entry_id: string | null
+          mission: Database["public"]["Enums"]["mission_code"]
+          phon_awarded: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          ledger_entry_id?: string | null
+          mission: Database["public"]["Enums"]["mission_code"]
+          phon_awarded?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          ledger_entry_id?: string | null
+          mission?: Database["public"]["Enums"]["mission_code"]
+          phon_awarded?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "missions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      referrals: {
+        Row: {
+          created_at: string
+          id: string
+          referred_id: string
+          referred_ledger_id: string | null
+          referred_phon: string
+          referrer_id: string
+          referrer_ledger_id: string | null
+          referrer_phon: string
+          rewarded_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          referred_id: string
+          referred_ledger_id?: string | null
+          referred_phon?: string
+          referrer_id: string
+          referrer_ledger_id?: string | null
+          referrer_phon?: string
+          rewarded_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          referred_id?: string
+          referred_ledger_id?: string | null
+          referred_phon?: string
+          referrer_id?: string
+          referrer_ledger_id?: string | null
+          referrer_phon?: string
+          rewarded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "referrals_referred_id_fkey"
+            columns: ["referred_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "referrals_referrer_id_fkey"
+            columns: ["referrer_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roulette_spins: {
+        Row: {
+          created_at: string
+          id: string
+          ledger_entry_id: string | null
+          phon_awarded: string
+          prize_index: number
+          server_seed: string | null
+          server_seed_hash: string
+          spun_date: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          ledger_entry_id?: string | null
+          phon_awarded: string
+          prize_index: number
+          server_seed?: string | null
+          server_seed_hash: string
+          spun_date: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          ledger_entry_id?: string | null
+          phon_awarded?: string
+          prize_index?: number
+          server_seed?: string | null
+          server_seed_hash?: string
+          spun_date?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roulette_spins_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_streaks: {
+        Row: {
+          current_streak: number
+          last_claimed_date: string | null
+          longest_streak: number
+          total_phon_earned: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          current_streak?: number
+          last_claimed_date?: string | null
+          longest_streak?: number
+          total_phon_earned?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          current_streak?: number
+          last_claimed_date?: string | null
+          longest_streak?: number
+          total_phon_earned?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_streaks_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      welcome_bonuses: {
+        Row: {
+          claimed_at: string
+          ledger_entry_id: string | null
+          phon_awarded: string
+          referral_bonus: string
+          user_id: string
+        }
+        Insert: {
+          claimed_at?: string
+          ledger_entry_id?: string | null
+          phon_awarded: string
+          referral_bonus?: string
+          user_id: string
+        }
+        Update: {
+          claimed_at?: string
+          ledger_entry_id?: string | null
+          phon_awarded?: string
+          referral_bonus?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "welcome_bonuses_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -405,6 +643,26 @@ export type Database = {
         }
         Returns: string
       }
+      rpc_claim_welcome_bonus: {
+        Args: { p_idempotency_key?: string }
+        Returns: Json
+      }
+      rpc_claim_daily_reward: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      rpc_spin_roulette: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      rpc_complete_mission: {
+        Args: { p_mission: string }
+        Returns: Json
+      }
+      rpc_register_referral: {
+        Args: { p_referrer_code: string }
+        Returns: Json
+      }
     }
     Enums: {
       admin_role:
@@ -422,6 +680,15 @@ export type Database = {
         | "phone_verified"
         | "id_verified"
       ledger_direction: "credit" | "debit" | "lock" | "unlock" | "reverse"
+      mission_code:
+        | "complete_profile"
+        | "first_trade"
+        | "first_game"
+        | "first_deposit"
+        | "kyc_verified"
+        | "invite_3_friends"
+        | "streak_7_days"
+        | "streak_30_days"
       user_role: "user" | "admin"
       withdrawal_status:
         | "pending"
@@ -549,6 +816,16 @@ export const Constants = {
         "id_verified",
       ],
       ledger_direction: ["credit", "debit", "lock", "unlock", "reverse"],
+      mission_code: [
+        "complete_profile",
+        "first_trade",
+        "first_game",
+        "first_deposit",
+        "kyc_verified",
+        "invite_3_friends",
+        "streak_7_days",
+        "streak_30_days",
+      ],
       user_role: ["user", "admin"],
       withdrawal_status: [
         "pending",

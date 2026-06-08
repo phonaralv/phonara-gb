@@ -414,3 +414,444 @@ body { min-height: 100dvh; }
   font-size: 0.93rem;
 }
 .empty-state span { font-size: 2.5rem; }
+
+/* ─── Modal overlay ────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 36px 28px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  position: relative;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ─── Welcome modal ────────────────────────────────────────── */
+.welcome-emoji   { font-size: 3.5rem; margin-bottom: 8px; }
+.welcome-title   { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
+.welcome-subtitle { color: var(--text-muted); margin-bottom: 12px; }
+.welcome-subtitle strong { color: #fbbf24; font-size: 1.1em; }
+
+.welcome-value-badge {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  padding: 6px 20px;
+  display: inline-block;
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+}
+
+.welcome-ref-prompt { color: var(--text-muted); font-size: 0.88rem; margin-bottom: 8px; }
+
+.welcome-ref-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+  text-align: center;
+  letter-spacing: 0.1em;
+}
+
+.welcome-ref-error   { color: #f87171; font-size: 0.83rem; margin: 4px 0; }
+.welcome-ref-success { color: #4ade80; font-size: 0.85rem; margin: 4px 0; }
+
+.welcome-bonus-list {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bonus-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.bonus-item strong { color: #38bdf8; font-weight: 600; }
+.bonus-referral strong { color: #fbbf24; }
+
+.welcome-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+
+.btn-full   { width: 100%; }
+.btn-ghost  { background: transparent; border: none; color: var(--text-muted); font-size: 0.85rem; cursor: pointer; padding: 6px; }
+.btn-ghost:hover { color: var(--text-primary); }
+
+.welcome-claiming { padding: 40px 0; color: var(--text-muted); }
+.spin-animation   { font-size: 3rem; animation: pulse 0.6s infinite alternate; }
+@keyframes pulse  { from { transform: scale(1); } to { transform: scale(1.2); } }
+
+.welcome-earned {
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(251, 191, 36, 0.1));
+  border-radius: 16px;
+  margin: 16px 0;
+}
+
+.earned-amount { font-size: 2rem; font-weight: 800; color: #38bdf8; }
+.earned-krw    { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+
+.referral-bonus-note { color: #fbbf24; font-size: 0.87rem; margin: 8px 0; }
+
+.welcome-cta { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; margin: 12px 0 20px; }
+.welcome-cta small { opacity: 0.7; }
+
+/* ─── Retention Section ────────────────────────────────────── */
+.retention-section { padding: 0 20px 16px; }
+
+.section-sub {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.retention-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 600px) {
+  .retention-grid { grid-template-columns: 1fr; }
+}
+
+.retention-missions { /* full width card */ }
+
+/* ─── Retention Cards ──────────────────────────────────────── */
+.retention-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  margin: 0;
+}
+
+.card-icon { font-size: 1.2rem; }
+
+.streak-badge {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.badge-once {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+/* ─── Streak bar ────────────────────────────────────────────── */
+.streak-bar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.streak-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.streak-day.done {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.streak-day.today {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.4);
+  font-weight: 700;
+}
+
+.day-label { font-size: 0.65rem; opacity: 0.7; }
+.day-reward { font-size: 0.72rem; font-weight: 600; }
+
+.streak-milestone {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: #fbbf24;
+  text-align: center;
+}
+
+.btn-claim {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-claim:hover:not(:disabled)  { opacity: 0.9; transform: translateY(-1px); }
+.btn-claim:active:not(:disabled) { transform: translateY(0); }
+.btn-claim:disabled               { opacity: 0.5; cursor: not-allowed; }
+
+.already-claimed {
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: #4ade80;
+  text-align: center;
+}
+
+.claim-toast {
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  color: #fbbf24;
+  text-align: center;
+  animation: slideUp 0.3s ease;
+}
+
+.streak-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.card-error { color: #f87171; font-size: 0.82rem; text-align: center; }
+
+/* ─── Roulette Card ─────────────────────────────────────────── */
+.roulette-display {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.roulette-display.spinning  { background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.3); }
+.roulette-display.won       { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.4); }
+
+.roulette-prize-label {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.roulette-display.spinning .roulette-prize-label {
+  animation: rouletteSpin 0.12s infinite;
+}
+
+@keyframes rouletteSpin {
+  0%   { transform: translateY(-8px); opacity: 0.4; }
+  50%  { transform: translateY(0);    opacity: 1; }
+  100% { transform: translateY(8px);  opacity: 0.4; }
+}
+
+.roulette-confetti { font-size: 1.5rem; animation: bounce 0.5s ease infinite alternate; }
+@keyframes bounce { from { transform: scale(0.9); } to { transform: scale(1.2); } }
+
+.prize-tiers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.prize-tier {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: center;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.prize-tier.active {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.5);
+  font-weight: 700;
+}
+
+.prize-tier.rare { color: #c084fc; }
+.prize-tier.rare.active { background: rgba(192, 132, 252, 0.2); border-color: rgba(192, 132, 252, 0.5); }
+
+.roulette-expected { font-size: 0.73rem; color: var(--text-muted); text-align: center; margin: 0; }
+
+.btn-spin {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-spin:hover:not(:disabled)  { opacity: 0.9; transform: translateY(-1px); }
+.btn-spin:disabled               { opacity: 0.5; cursor: not-allowed; }
+.btn-spin.spinning               { animation: glow 0.8s ease infinite alternate; }
+
+@keyframes glow {
+  from { box-shadow: 0 0 8px rgba(99, 102, 241, 0.4); }
+  to   { box-shadow: 0 0 20px rgba(139, 92, 246, 0.8); }
+}
+
+.rare-win-banner {
+  background: linear-gradient(135deg, rgba(192, 132, 252, 0.2), rgba(251, 191, 36, 0.15));
+  border: 1px solid rgba(192, 132, 252, 0.4);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #c084fc;
+  text-align: center;
+  animation: slideUp 0.3s ease;
+}
+
+/* ─── Missions Card ─────────────────────────────────────────── */
+.missions-total-reward {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.missions-progress {
+  font-size: 0.78rem;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.missions-skeleton { display: flex; flex-direction: column; gap: 8px; }
+.skeleton-row {
+  height: 40px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--bg-card) 25%, rgba(255,255,255,0.04) 50%, var(--bg-card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.mission-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mission-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.2s;
+}
+
+.mission-item.done {
+  background: rgba(74, 222, 128, 0.06);
+  border-color: rgba(74, 222, 128, 0.15);
+}
+
+.mission-icon  { font-size: 1.1rem; flex-shrink: 0; }
+.mission-label { flex: 1; font-size: 0.88rem; color: var(--text-primary); }
+.mission-item.done .mission-label { color: var(--text-muted); text-decoration: line-through; }
+.mission-reward {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #38bdf8;
+  white-space: nowrap;
+}
+.mission-item.done .mission-reward { color: #4ade80; }

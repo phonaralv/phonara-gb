@@ -1,0 +1,37 @@
+﻿# PHONARA Cursor Rules
+
+Always read `docs/PHONARA_V2_MASTER_PLAN.md`, `docs/FINAL_DIRECTION.md`, `docs/QUALITY_GATES.md`, and the relevant domain docs before making implementation changes.
+
+## Non-negotiables
+
+- Before starting core engine or high-risk work, stop and tell the user: "AI 모델을 바꿔주세요." Continue only after the user confirms.
+- Do not apply Supabase schema/RLS/RPC changes without explicit user approval.
+- Do not use JavaScript `number` or floating point arithmetic for money, balances, odds, PnL, fees, or exchange rates.
+- Use Decimal-based money utilities from `@phonara/money` once engine implementation begins.
+- Ledger changes must be append-only, atomic, auditable, and idempotent.
+- User-facing copy must use i18n keys. Korean text belongs in locale files, not JSX.
+- Keep user app and admin app separated: `apps/web` and `apps/admin`.
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code or `VITE_` env vars.
+- Normal operations should be automated; humans handle exceptions through Admin.
+
+## Execution Order
+
+1. Governance, docs, rules, scaffold, quality gates.
+2. Types and domain models.
+3. Money/Decimal and wallet ledger engines.
+4. Supabase schema/RLS/RPC drafts, then approval.
+5. Minimal UI and E2E.
+6. Admin automation, PWA, monitoring, global UX.
+
+## Model-Switch Stop Rule
+
+Pause before these work types and ask the user to switch AI model:
+
+- Money/Decimal engine implementation.
+- Wallet ledger implementation.
+- Trading engine implementation.
+- Game engine or provably fair implementation.
+- Supabase schema/RLS/RPC migration application.
+- Admin permission, withdrawal, or kill-switch logic.
+- Security-sensitive auth/session changes.
+- Any task that can affect user balances, settlement, or withdrawals.

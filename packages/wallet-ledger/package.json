@@ -1,0 +1,26 @@
+{
+  "name": "@phonara/wallet-ledger",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "vitest": "latest"
+  },
+  "dependencies": {
+    "@phonara/money": "workspace:*",
+    "@phonara/shared-types": "workspace:*"
+  }
+}

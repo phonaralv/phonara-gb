@@ -1,0 +1,11 @@
+---
+description: Testing and cleanup rules
+alwaysApply: true
+---
+
+# Testing
+
+- Risky domain logic requires unit tests.
+- User-facing flows require Playwright smoke or E2E coverage.
+- Tests must not leave persistent mock data, temporary accounts, or generated artifacts in the repo.
+- Before marking work complete, run the narrowest reliable check first, then broader checks when appropriate.

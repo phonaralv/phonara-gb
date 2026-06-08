@@ -1,0 +1,12 @@
+---
+description: Admin automation rules
+alwaysApply: true
+---
+
+# Admin Automation
+
+- Admin is designed for 1-person operation first, expandable to role-based teams later.
+- Normal cases should be automated; Admin should focus on exception queues.
+- Every manual Admin action requires a reason and audit log.
+- High-risk operations require confirmation and appropriate permissions.
+- Kill switches must be simple, visible, and auditable.

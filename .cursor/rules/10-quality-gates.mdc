@@ -1,0 +1,16 @@
+---
+description: Quality gates
+alwaysApply: true
+---
+
+# Quality Gates
+
+A task is not complete until relevant gates pass:
+
+- TypeScript strict checks.
+- Lint and formatting checks.
+- Unit tests for domain logic.
+- E2E/smoke tests for critical flows.
+- Env and i18n coverage checks.
+- Security review for Supabase/RLS/RPC or admin changes.
+- Test residue cleanup.

@@ -1,0 +1,13 @@
+---
+description: Supabase safety rules
+alwaysApply: true
+---
+
+# Supabase Safety
+
+- Generate SQL/RPC/RLS as drafts first.
+- Explain security and data impact before applying migrations.
+- Apply remote database changes only after explicit user approval.
+- RLS policies require positive and negative tests.
+- User-visible database errors should return stable error codes and be translated in the client.
+- Service role keys are server-only and must never be used in Vite/browser code.

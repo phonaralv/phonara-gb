@@ -1,0 +1,12 @@
+---
+description: i18n and UX rules
+alwaysApply: true
+---
+
+# i18n and UX
+
+- Korean is default, but all user-facing copy must be i18n-keyed.
+- English mode must not show Korean strings.
+- Mobile is touch-first, safe-area aware, and PWA-ready.
+- Desktop supports exchange/admin-grade multi-panel workflows.
+- High-risk money, trading, staking, betting, and withdrawal actions require confirmation UX.

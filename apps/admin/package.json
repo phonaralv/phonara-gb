@@ -1,0 +1,24 @@
+{
+  "name": "@phonara/admin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 3001",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 3001"
+  },
+  "dependencies": {
+    "@phonara/i18n": "workspace:*",
+    "@phonara/shared-types": "workspace:*",
+    "@supabase/supabase-js": "latest",
+    "@tanstack/react-router": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

@@ -1,0 +1,26 @@
+---
+description: PHONARA core engineering rules
+alwaysApply: true
+---
+
+# Core Rules
+
+- Treat `docs/PHONARA_V2_MASTER_PLAN.md` as the source of truth.
+- Before starting core engine or high-risk work, stop and tell the user: "AI 모델을 바꿔주세요."
+- Prefer small, tested, auditable changes.
+- Implement engines before decorative UI.
+- Preserve a clear boundary between `apps/web`, `apps/admin`, and `packages/*`.
+- Do not add compatibility shims for unshipped work on this branch; keep the branch clean and direct.
+
+## Model-Switch Stop Rule
+
+Stop before:
+
+- Money/Decimal engine implementation.
+- Wallet ledger implementation.
+- Trading engine implementation.
+- Game engine or provably fair implementation.
+- Supabase schema/RLS/RPC migration application.
+- Admin permission, withdrawal, or kill-switch logic.
+- Security-sensitive auth/session changes.
+- Any task that can affect balances, settlement, or withdrawals.

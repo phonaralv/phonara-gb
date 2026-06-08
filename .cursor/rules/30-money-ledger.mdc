@@ -1,0 +1,13 @@
+---
+description: Money and ledger correctness rules
+alwaysApply: true
+---
+
+# Money and Ledger
+
+- No floating point arithmetic for monetary values, odds, rates, balances, or PnL.
+- Money operations must use Decimal utilities.
+- Ledger entries are append-only.
+- Balance-changing operations require idempotency keys.
+- Every exchange, deposit, withdrawal, game bet, trading position, and reward must store a rate snapshot when applicable.
+- Available and locked balances must be explicit.

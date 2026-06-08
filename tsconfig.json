@@ -1,13 +1,13 @@
 {
   "files": [],
   "references": [
-    { "path": "./apps/web" },
-    { "path": "./apps/admin" },
     { "path": "./packages/shared-types" },
     { "path": "./packages/money" },
     { "path": "./packages/wallet-ledger" },
     { "path": "./packages/trading-engine" },
     { "path": "./packages/game-engine" },
-    { "path": "./packages/i18n" }
+    { "path": "./packages/i18n" },
+    { "path": "./apps/web" },
+    { "path": "./apps/admin" }
   ]
 }

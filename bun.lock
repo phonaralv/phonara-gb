@@ -52,6 +52,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@phonara/i18n": "workspace:*",
+        "@phonara/money": "workspace:*",
         "@phonara/shared-types": "workspace:*",
         "@supabase/supabase-js": "latest",
         "@tanstack/react-router": "latest",

@@ -14,7 +14,7 @@
     "build": "bun run build:packages && bun run build:apps",
     "build:apps": "bun --filter @phonara/web build && bun --filter @phonara/admin build",
     "build:packages": "bun --filter './packages/*' build",
-    "typecheck": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b --force tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

@@ -2342,6 +2342,76 @@ phonara-gb/
 > 형식: 날짜 · 무엇을/어떻게 · 발생 오류와 근본원인→수정 · 실행 테스트/결과.
 > 새 세션은 이 로그만 읽고 이어서 작업할 수 있어야 한다.
 
+## 2026-06-11 — Observability 1단계 내부 운영 상태판
+
+### Admin ops health RPC + Overview 5카드
+- **무엇을**: 1인 운영자가 새벽에도 정상/주의/즉시 대응을 빠르게 판단할 수 있도록 내부
+  Observability 1단계를 구현. 외부 Sentry/Slack/PostHog 연동이나 `ops_alerts` 큐는 만들지 않고,
+  기존 Supabase 신호만 읽는 최소 상태판으로 마감.
+- **어떻게**:
+  - [`supabase/migrations/20260611000058_ops_health_rpc.sql`](../supabase/migrations/20260611000058_ops_health_rpc.sql):
+    admin-only `rpc_get_ops_health()` 추가. `SECURITY DEFINER`, `SET search_path = public, pg_temp`,
+    anon/PUBLIC revoke, authenticated/service_role grant + 내부 `_is_admin()` 가드. 반환은
+    `status`, `lastUpdatedAt`, `checks[]`이며 check id는 `system_mode`,
+    `reconciliation_latest`, `cron_liquidation_liveness`, `liquidation_recent_error`,
+    `treasury_freshness`, `operator_high_risk_actions` 6개로 고정. 무거운 reconciliation/hash-chain
+    검사는 실행하지 않고 `app_config`, `reconciliation_log`, `cron.job_run_details`,
+    `liquidation_run_log`, `treasury_reserves`, `audit_logs` 최신 저장 결과만 읽음.
+  - [`supabase/tests/ops_health_test.sql`](../supabase/tests/ops_health_test.sql): admin 호출 성공,
+    non-admin authenticated/anon 차단, fixed check id, `system_halt`/`system_readonly`,
+    reconciliation mismatch row, liquidation error row 주입 기반 status 판정 검증.
+  - [`apps/admin/src/routes/overview.tsx`](../apps/admin/src/routes/overview.tsx): 기존 빈 Overview를
+    5개 카드(`System Mode`, `Reconciliation`, `Cron/Liquidation`, `Treasury Freshness`,
+    `Recent Operator Actions`)로 교체. `@phonara/ui`의 기존 `Card`, `Badge`, `Skeleton`,
+    `ErrorState`, `Button`만 사용해 새 공유 컴포넌트는 만들지 않음. polling 기본 60초,
+    수동 새로고침 제공. RPC 실패 시 전체 페이지를 죽이지 않고 `Health RPC Unavailable`
+    상태와 `app_config` 기반 `system_halt`/`system_readonly` fallback만 표시.
+  - [`packages/i18n/src/index.ts`](../packages/i18n/src/index.ts): Admin Overview 상태판 문구 ko/en
+    키 추가. [`packages/shared-types/src/database.types.ts`](../packages/shared-types/src/database.types.ts):
+    `rpc_get_ops_health` 타입 항목 추가.
+  - [`docs/RUNBOOK.md`](RUNBOOK.md): Admin Overview 카드/runbookKey와 기존 인시던트 시나리오 연결만
+    짧게 추가. Runbook 중복 문서는 만들지 않음.
+- **오류/수정**: TypeScript strict에서 index signature 값을 dot 접근해 TS4111이 발생했고,
+  Combined 카드 내부 `useT()` 누락으로 `t` 미정의 오류가 발생. `value['key']` 접근과
+  local `const t = useT()`로 수정. `cron.job_run_details`는 `jobname` 직접 의존 대신
+  `cron.job` join으로 조회해 pg_cron 표준 컬럼에 맞춤. 포맷 확인 중 기존 레포 전반의
+  Prettier 미적용 상태가 드러나 변경 파일만 정리한 뒤, 대형 generated/doc 파일 churn은 제거함.
+- **검증**:
+  - `supabase db reset` green — 새 migration까지 로컬 PG17 스택에 적용.
+  - `bun run test:sql` green — 29/29 SQL test files passed, `ops_health_test.sql` 포함.
+  - `bun run typecheck`, `bun run check:i18n`, `bun run lint`, `bun run check:release`, `bun run test`,
+    `bun run build`, `bun run check:deps` green.
+  - 변경 TS/MD 파일 대상 `bunx prettier --check ...` green. 전체 `bun run format:check`는 기존
+    레포 전반 166개 파일의 포맷 상태 때문에 실패하므로 이번 변경 완료 게이트로 사용하지 않음.
+  - `bun run check:env`는 exit 0이나 로컬 `.env` 값(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+    미설정 안내를 출력. `bun run check:advisors`는 `SUPABASE_ACCESS_TOKEN` 부재로 설계대로
+    SKIP(exit 0)했으며 CI/원격 강제에는 시크릿 필요. Vite chunk-size/PWA inlineDynamicImports
+    경고는 기존 빌드 경고이며 이번 변경의 실패 요인이 아님.
+- **원격 변경**: 없음. 로컬 migration/test/UI/doc 변경만 수행.
+
+### Ops health practical summaries (RPC 고도화)
+- **무엇을**: `rpc_get_ops_health()` summary 품질과 stale 판단을 운영자가 3초 안에 판단할 수 있도록
+  고도화. top-level 반환 구조(`status`, `lastUpdatedAt`, `checks[]`)와 6개 check id는 유지.
+- **어떻게**:
+  - [`supabase/migrations/20260611000059_ops_health_practical_summaries.sql`](../supabase/migrations/20260611000059_ops_health_practical_summaries.sql):
+    내부 `_ops_relative_age()` 헬퍼 추가(anon/authenticated revoke). `rpc_get_ops_health()` 재정의.
+    `reconciliation_latest`는 latest run vs last fully successful run을 분리하고 fresh success 기준
+    `2 hours`. latest failed + fresh success → `warning`; latest failed + stale/missing success →
+    `critical`; success older than 2h → `warning`. `cron_liquidation_liveness`는 last run vs last
+    successful run 분리, fresh success `30 minutes`. stale success → `critical`; failed last run +
+    fresh success → `warning`. check별 summary에 상대 시간·실패 check_type·action count 포함.
+    optional metadata: `lastRunAt`, `lastSuccessfulAt`, `lastErrorAt`. 금액/user id/payload 미포함.
+  - [`supabase/tests/ops_health_test.sql`](../supabase/tests/ops_health_test.sql): 기존 auth/status
+    검증 유지 + reconciliation warning/critical/stale 2h 경계, cron warning/critical 30m 경계,
+    summary/metadata/assert no user id in operator summary 케이스 추가.
+- **오류/수정**: operator action 테스트에서 동일 `created_at`으로 latest action tie가 발생.
+    `created_at`을 명시해 `feature_toggle`이 최신 action으로 고정되도록 수정.
+- **검증**:
+  - `supabase db reset` green — migration `000059` 적용.
+  - `bun run test:sql` green — 29/29 passed, `ops_health_test.sql` 포함.
+  - `bun run check:release` green.
+- **원격 변경**: 없음. 로컬 migration/test/doc만.
+
 ## 2026-06-11 — Auth Entry Pages 적용
 
 ### FOMO/프로모션 카피 정책 표현 완화

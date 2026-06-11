@@ -2724,6 +2724,7 @@ export type Database = {
         Args: { p_interval: string; p_limit?: number; p_symbol: string }
         Returns: Json
       }
+      rpc_get_ops_health: { Args: never; Returns: Json }
       rpc_get_synthetic_book: {
         Args: { p_levels?: number; p_symbol: string }
         Returns: Json

@@ -9,6 +9,22 @@
 
 ---
 
+## Admin Overview 빠른 판정
+
+Admin Overview는 `rpc_get_ops_health()`가 저장된 최신 운영 신호만 읽어 5개 카드로 표시한다.
+빨간 항목은 아래 Runbook 시나리오로 바로 연결해 확인한다. 이 화면은 즉석 재조정이나
+hash-chain 검사를 실행하지 않으며, 최신 로그를 보고 새벽 대응 우선순위를 정하는 용도다.
+
+| Admin 카드 | 빨간 항목 / runbookKey | 확인할 시나리오 |
+|------------|------------------------|-----------------|
+| 시스템 모드 | `system_mode_active` | Scenario 1, Scenario 2, Scenario 5 |
+| 재조정 | `reconciliation_mismatch` | Scenario 1 |
+| 크론/청산 | `cron_liquidation_stale`, `liquidation_recent_error` | Scenario 4 |
+| 리저브 최신성 | `treasury_stale` | Scenario 3 |
+| 최근 운영자 조치 | `operator_actions_review` | 감사 로그에서 변경 사유와 대상 확인 |
+
+---
+
 ## 🔴 Scenario 1: Reconciliation 불일치 → 자동 system_readonly
 
 **발동 조건**: `rpc_run_reconciliation()` (매일 02:00 UTC, pg_cron)이 아래 **5종 검사** 중

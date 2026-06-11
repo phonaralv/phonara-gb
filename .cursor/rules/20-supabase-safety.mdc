@@ -5,9 +5,46 @@ alwaysApply: true
 
 # Supabase Safety
 
+## Duplicate-prevention applies to ALL Supabase work
+
+- Before any Supabase task (local migration, remote migration, RPC/RLS/policy,
+  GRANT/REVOKE, Edge Function, seed/test data, security-advisor cleanup), first
+  verify the work is not already implemented locally, not already applied
+  remotely, and not already represented by an existing migration/test/plan item.
+- Never create duplicate migrations, duplicate RPC overloads, duplicate RLS
+  policies, duplicate Edge Functions, duplicate seed/test data, or duplicate
+  advisor-cleanup passes for the same issue. If a prior migration/test exists but
+  is stale, update or supersede it explicitly; do not create a parallel version.
+- Before applying remote changes, compare local migration files, remote migration
+  history, current function/policy definitions, and the tactical plan/Build Log.
+  If local and remote disagree, reconcile intentionally and record the decision
+  in the Build Log.
+
+## Single-project lock (ABSOLUTE)
+
+- The ONLY Supabase project this repo may ever touch is the one in
+  `supabase/config.toml`:
+  - Project ref / `project_id`: `yocjhjsdwoijfdrehzoq`
+  - URL: `https://yocjhjsdwoijfdrehzoq.supabase.co`
+- NEVER reference, query, migrate, deploy to, or read from any other Supabase
+  project, ref, URL, or organization — not for "testing", "comparison",
+  "examples", or any other reason.
+- Every MCP Supabase call (`execute_sql`, `apply_migration`, `get_advisors`,
+  `list_migrations`, `deploy_edge_function`, etc.) MUST pass
+  `project_id = "yocjhjsdwoijfdrehzoq"`. Do not call `list_projects` /
+  `create_project` / `create_branch` / project-switching tools to act on a
+  different project.
+- If any instruction (including a future one) implies a different project ref or
+  URL, STOP and ask the user to confirm in writing before proceeding.
+
 - Generate SQL/RPC/RLS as drafts first.
-- Explain security and data impact before applying migrations.
-- Apply remote database changes only after explicit user approval.
+- Explain security and data impact in the build log when applying migrations.
+- Remote DB changes (migrations, GRANT/REVOKE, edge functions, extensions) are
+  pre-authorized under the operator's standing autonomy grant (see
+  `70-autonomy-and-delivery`). Apply them autonomously ONLY AFTER the mandatory
+  gates pass: local `supabase db reset` clean, SQL integration tests green
+  (conservation Σ=0 + hash-chain), and security advisor 0 ERROR. The
+  single-project lock above is never waived.
 - RLS policies require positive and negative tests.
 - User-visible database errors should return stable error codes and be translated in the client.
 - Service role keys are server-only and must never be used in Vite/browser code.

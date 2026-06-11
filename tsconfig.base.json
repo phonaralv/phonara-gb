@@ -24,7 +24,8 @@
       "@phonara/wallet-ledger": ["./packages/wallet-ledger/src"],
       "@phonara/trading-engine": ["./packages/trading-engine/src"],
       "@phonara/game-engine": ["./packages/game-engine/src"],
-      "@phonara/i18n": ["./packages/i18n/src"]
+      "@phonara/i18n": ["./packages/i18n/src"],
+      "@phonara/ui": ["./packages/ui/src"]
     }
   }
 }

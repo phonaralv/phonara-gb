@@ -77,8 +77,11 @@ export type LedgerErrorCode =
  * credit:  available += amount
  * debit:   available -= amount  (requires available >= amount)
  * lock:    available -= amount, locked += amount
+ * lock:    available -= amount, locked += amount
  * unlock:  locked -= amount, available += amount
- * reverse: available += amount  (reversal of a prior debit)
+ *
+ * `reverse` exists in the DB enum for paired RPC reversals only; standalone
+ * in-memory reverse is rejected to prevent unpaired Σ=0 violations.
  */
 export function applyLedgerEntry(
   balance: WalletBalance,
@@ -144,10 +147,10 @@ export function applyLedgerEntry(
       };
     }
     case 'reverse': {
-      return {
-        ...balance,
-        available: add(available, amount).amount,
-      };
+      throw new LedgerError(
+        'reverse direction requires a paired original debit via server RPC',
+        'INVALID_DIRECTION',
+      );
     }
     default: {
       throw new LedgerError(`unknown direction: ${String(direction)}`, 'INVALID_DIRECTION');

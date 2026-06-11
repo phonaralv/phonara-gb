@@ -4,11 +4,13 @@ import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
 import { signOut } from '../lib/auth';
 import { useWallet } from '../hooks/use-wallet';
-import { format } from '@phonara/money';
-import { WelcomeModal } from '../components/WelcomeModal';
-import { DailyClaimCard } from '../components/DailyClaimCard';
-import { RouletteCard } from '../components/RouletteCard';
-import { MissionsCard } from '../components/MissionsCard';
+import { formatMoney, Badge, Button, Card, Skeleton } from '@phonara/ui';
+import { useT } from '../lib/i18n';
+import { WelcomeModal } from '../components/welcome-modal';
+import { DailyClaimCard } from '../components/daily-claim-card';
+import { RouletteCard } from '../components/roulette-card';
+import { MissionsCard } from '../components/missions-card';
+import { ReferralDashboardCard } from '../components/referral-dashboard-card';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -17,6 +19,7 @@ export const Route = createRoute({
 });
 
 function DashboardPage() {
+  const t = useT();
   const { session, loading: authLoading } = useAuth();
   const { wallet, loading: walletLoading, error } = useWallet();
   const navigate = useNavigate();
@@ -47,7 +50,11 @@ function DashboardPage() {
   if (authLoading) {
     return (
       <div className="shell">
-        <span className="spinner" aria-label="Loading" />
+        <Card className="grid w-full max-w-md gap-4 p-5" aria-busy="true">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-10" />
+        </Card>
       </div>
     );
   }
@@ -58,77 +65,72 @@ function DashboardPage() {
         <WelcomeModal onDismiss={() => setShowWelcome(false)} />
       )}
 
-      <div className="dashboard">
+      <div className="dashboard" data-testid="dashboard-page">
         <header className="dash-header">
           <div className="dash-logo">
             <span className="logo-mark">P</span>
             <span className="logo-name">PHONARA</span>
           </div>
           <nav className="dash-nav">
-            <Link to="/ledger" className="nav-link">원장 내역</Link>
-            <button onClick={handleSignOut} className="btn-ghost-sm">로그아웃</button>
+            <Link to="/ledger" className="nav-link">{t('nav.ledgerHistory')}</Link>
+            <Button variant="outline" size="sm" onClick={handleSignOut}>{t('nav.logout')}</Button>
           </nav>
         </header>
 
         <section className="wallet-section">
-          <h2 className="section-title">내 지갑</h2>
+          <h2 className="section-title">{t('wallet.title')}</h2>
 
           {walletLoading && (
             <div className="wallet-grid">
               {['PHON', 'USDT', 'KRW'].map(c => (
-                <div key={c} className="wallet-card skeleton" />
+                <Card key={c} className="h-[120px] animate-pulse bg-surface-2/40" />
               ))}
             </div>
           )}
 
-          {error && <p className="error-msg">지갑 로딩 실패: {error}</p>}
+          {error && <p className="error-msg">{t('wallet.loadError')}</p>}
 
           {wallet && !walletLoading && (
-            <div className="wallet-grid">
-              <WalletCard currency="PHON" available={wallet.phon_available} locked={wallet.phon_locked} color="#38bdf8" />
-              <WalletCard currency="USDT" available={wallet.usdt_available} locked={wallet.usdt_locked} color="#34d399" />
-              <WalletCard currency="KRW"  available={wallet.krw_available}  locked={wallet.krw_locked}  color="#a78bfa" />
-            </div>
+            <>
+              <Card className="mb-4 flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-fg">{t('dashboard.balanceSummary')}</p>
+                  <p className="mt-1 text-xs text-muted">{t('dashboard.balanceSummaryDesc')}</p>
+                </div>
+                <Badge tone={wallet.phon_locked !== '0.000000' ? 'warning' : 'primary'}>
+                  {wallet.phon_locked !== '0.000000' ? t('dashboard.badge.locked') : t('dashboard.badge.live')}
+                </Badge>
+              </Card>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <WalletCard currency="PHON" available={wallet.phon_available} locked={wallet.phon_locked} />
+                <WalletCard currency="USDT" available={wallet.usdt_available} locked={wallet.usdt_locked} />
+                <WalletCard currency="KRW" available={wallet.krw_available} locked={wallet.krw_locked} />
+              </div>
+            </>
           )}
         </section>
 
-        {/* Phase 2: Retention Section */}
-        <section className="retention-section">
-          <h2 className="section-title">
-            🏆 보상 센터
-            <span className="section-sub">매일 출석하고 룰렛을 돌려 PHON을 모으세요</span>
+        <section className="px-5 pb-4">
+          <h2 className="section-title flex flex-col gap-1 sm:flex-row sm:items-baseline">
+            {t('dashboard.rewardCenter')}
+            <span className="text-xs font-normal text-muted">{t('dashboard.rewardCenterSub')}</span>
           </h2>
-          <div className="retention-grid">
+          <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
             <DailyClaimCard />
             <RouletteCard />
+            <ReferralDashboardCard />
           </div>
-          <div className="retention-missions">
-            <MissionsCard />
-          </div>
+          <MissionsCard />
         </section>
 
         <section className="quick-section">
-          <h2 className="section-title">빠른 메뉴</h2>
-          <div className="quick-grid">
-            <Link to="/ledger" className="quick-card">
-              <span className="quick-icon">📋</span>
-              <span>원장 내역</span>
-            </Link>
-            <div className="quick-card coming-soon">
-              <span className="quick-icon">💳</span>
-              <span>원화 입금</span>
-              <span className="badge-soon">준비중</span>
-            </div>
-            <div className="quick-card coming-soon">
-              <span className="quick-icon">📈</span>
-              <span>트레이딩</span>
-              <span className="badge-soon">준비중</span>
-            </div>
-            <div className="quick-card coming-soon">
-              <span className="quick-icon">🎮</span>
-              <span>카지노</span>
-              <span className="badge-soon">준비중</span>
-            </div>
+          <h2 className="section-title">{t('dashboard.quickMenu')}</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <QuickLink to="/ledger" label={t('nav.ledgerHistory')} />
+            <QuickLink to="/wallet" label={t('dashboard.krwDeposit')} />
+            <QuickLink to="/trade" label={t('nav.trade')} />
+            <QuickLink to="/staking" label={t('nav.staking')} />
+            <QuickLink to="/casino" label={t('dashboard.casino')} />
           </div>
         </section>
       </div>
@@ -140,32 +142,40 @@ function WalletCard({
   currency,
   available,
   locked,
-  color,
 }: {
   currency: 'PHON' | 'USDT' | 'KRW';
   available: string;
   locked: string;
-  color: string;
 }) {
-  const fmtAvail = format({ currency, amount: available });
-  const fmtLocked = format({ currency, amount: locked });
+  const t = useT();
+  const fmtAvail = formatMoney(available, currency);
+  const fmtLocked = formatMoney(locked, currency);
+  const hasLocked = locked !== '0' && locked !== '0.000000';
 
   return (
-    <div className="wallet-card" style={{ '--accent': color } as React.CSSProperties}>
-      <div className="wc-header">
-        <span className="wc-currency">{currency}</span>
-        <span className="wc-dot" />
+    <Card className="relative flex flex-col gap-3 overflow-hidden p-5 transition-colors before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-primary hover:border-border-strong">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold tracking-wide text-primary">{currency}</span>
+        <Badge tone={hasLocked ? 'warning' : 'neutral'}>{hasLocked ? t('wallet.lockedShort') : t('common.available')}</Badge>
       </div>
-      <div className="wc-available">
-        <span className="wc-label">사용 가능</span>
-        <span className="wc-amount">{fmtAvail}</span>
+      <div>
+        <span className="mb-1 block text-xs text-muted">{t('wallet.available')}</span>
+        <span className="text-2xl font-bold tabular-nums text-fg">{fmtAvail}</span>
       </div>
-      {locked !== '0' && locked !== '0.000000' && (
-        <div className="wc-locked">
-          <span className="wc-label">잠금</span>
-          <span className="wc-amount-sm">{fmtLocked}</span>
+      {hasLocked && (
+        <div>
+          <span className="mb-1 block text-xs text-muted">{t('wallet.lockedShort')}</span>
+          <span className="text-sm font-medium tabular-nums text-muted">{fmtLocked}</span>
         </div>
       )}
-    </div>
+    </Card>
+  );
+}
+
+function QuickLink({ to, label }: { to: '/ledger' | '/wallet' | '/trade' | '/staking' | '/casino'; label: string }) {
+  return (
+    <Link to={to} className="rounded-2xl border border-border bg-surface p-4 text-sm font-semibold text-fg transition-colors hover:border-border-strong hover:bg-surface-2">
+      {label}
+    </Link>
   );
 }

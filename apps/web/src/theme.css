@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/* Scan the shared design-system package (lives outside this app's tree). */
+@source "../../../packages/ui/src";
+
+/*
+ * PHONARA design tokens — CSS-first (Tailwind v4 @theme). Token names map to
+ * utilities automatically: `--color-primary` → `bg-primary`/`text-primary`,
+ * `--font-sans` → `font-sans`, etc. This is the single source of design truth;
+ * components in @phonara/ui reference only these tokens.
+ */
+@theme {
+  /* Surfaces */
+  --color-bg: #050816;
+  --color-surface: #0b1220;
+  --color-surface-2: #111a2e;
+  --color-surface-elevated: #101a31;
+  --color-background: var(--color-bg);
+  --color-card: var(--color-surface);
+  --color-secondary: var(--color-surface-2);
+
+  /* Lines */
+  --color-border: rgba(148, 163, 184, 0.16);
+  --color-border-subtle: rgba(148, 163, 184, 0.22);
+  --color-border-strong: rgba(148, 163, 184, 0.34);
+
+  /* Text */
+  --color-fg: #eaf0fb;
+  --color-muted: #93a1b8;
+  --color-foreground: var(--color-fg);
+  --color-muted-foreground: var(--color-muted);
+  --color-secondary-foreground: var(--color-fg);
+
+  /* Brand — single accent: electric blue. Purple (#8b5cf6) demoted to secondary. */
+  --color-primary: #4f8cff;
+  --color-primary-bright: #78a8ff;
+  --color-primary-fg: #ffffff;
+  --color-primary-foreground: var(--color-primary-fg);
+  --color-accent: #4f8cff;          /* unified with primary — no v0 purple */
+  --color-accent-secondary: #8b5cf6; /* available if needed for gradients */
+
+  /* Auth/onboarding 2026 release tokens. */
+  --color-auth-bg: #0a0a0f;
+  --color-auth-violet: #8b5cf6;
+  --color-auth-violet-bright: #a78bfa;
+  --color-auth-indigo: #6366f1;
+  --color-auth-blue: #3b82f6;
+  --color-auth-cyan: #22d3ee;
+  --color-auth-pink: #ec4899;
+  --color-auth-live: #22c55e;
+
+  /* Market semantics */
+  --color-up: #22c55e;
+  --color-down: #ef4444;
+  --color-destructive: var(--color-down);
+  --color-warning: #f59e0b;
+
+  /* Type & shape */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+}
+
+/* App-level base. Existing route CSS (styles.css) still applies on top. */
+html {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Tabular numerals globally: balances/prices/PnL never shift width per tick.
+     This is the single detail that separates a real exchange UI from a mockup. */
+  font-variant-numeric: tabular-nums;
+}
+
+:root {
+  --primary: 217 100% 65%;
+  --rgb-primary: 79 140 255;
+  --rgb-primary-bright: 120 168 255;
+  --rgb-accent-secondary: 139 92 246;
+  --rgb-auth-violet: 139 92 246;
+  --rgb-auth-violet-bright: 167 139 250;
+  --rgb-auth-indigo: 99 102 241;
+  --rgb-auth-blue: 59 130 246;
+  --rgb-auth-cyan: 34 211 238;
+  --rgb-auth-pink: 236 72 153;
+  --rgb-auth-live: 34 197 94;
+  --rgb-auth-white: 255 255 255;
+  --rgb-auth-black: 0 0 0;
+  --shadow-auth-card:
+    0 8px 32px rgb(var(--rgb-auth-black) / 0.4),
+    0 2px 8px rgb(var(--rgb-auth-violet) / 0.1),
+    inset 0 1px 0 rgb(var(--rgb-auth-white) / 0.08);
+  --shadow-auth-cta:
+    0 4px 16px rgb(var(--rgb-auth-violet) / 0.4),
+    inset 0 1px 0 rgb(var(--rgb-auth-white) / 0.2);
+  --shadow-auth-cta-hover:
+    0 8px 24px rgb(var(--rgb-auth-violet) / 0.55),
+    0 0 30px rgb(var(--rgb-auth-indigo) / 0.3);
+}

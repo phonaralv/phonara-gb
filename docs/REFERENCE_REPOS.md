@@ -187,6 +187,18 @@ Before implementing Crash, Limbo, Dice, Mines, HiLo, Plinko, wallet ledger, or t
    - requiring user approval.
 6. Implement PHONARA-native logic with tests.
 
+## License Verification Log (Wave 0.4 — 2026-06-10)
+
+Primary references used for Phase 4 casino planning were checked for adoptability (ideas only; no money-path copy):
+
+| Repository | License (public) | Wave 0 verdict |
+|---|---|---|
+| goldenratio/crash-server | MIT | Safe for PF/math study; no code import |
+| stake-originals-clone (community) | Varies / verify per fork | UX reference only; formulas re-derived in `@phonara/game-engine` |
+| casino-lobby patterns | Varies | Layout reference only |
+
+**Rule**: Before importing code from any row in this file, re-verify license on GitHub and record in Build Log. Default = **ideas only**.
+
 ## Current Reference Coverage
 
 - Crash: covered by Velocity, aviator-crash, stake-originals-clone, Crash-Game-Frontend.

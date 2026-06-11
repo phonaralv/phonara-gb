@@ -1,0 +1,89 @@
+---
+description: PostgreSQL / PL/pgSQL / Supabase function authoring rules (hard-won from real apply-time bugs)
+alwaysApply: true
+---
+
+# PostgreSQL / PL/pgSQL / Supabase Authoring
+
+These rules come from real runtime bugs caught during P0 hardening. Each one
+silently passed TypeScript/unit checks and only failed when the migration was
+applied or the specific SQL branch executed. Treat every item as mandatory.
+
+## Function bodies
+
+- No explicit `SAVEPOINT` / `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT` inside
+  a function or `DO` block (SQLSTATE 42601). For per-item isolation use a nested
+  `BEGIN ... EXCEPTION WHEN OTHERS THEN ... END` block, which Postgres maps to an
+  implicit savepoint.
+- `STABLE` / `IMMUTABLE` functions must NOT run `SET` in the body ("SET is not
+  allowed in a non-volatile function"). Put `SET search_path = public, pg_temp`
+  in the function header (between the `AS` and the body declaration), not inside
+  `BEGIN`. Only `VOLATILE` functions may `SET` in the body.
+- `format()` supports only `%s`, `%I`, `%L`, `%%`. C-style specifiers like
+  `%.4f`, `%d`, `%f` raise "unrecognized format() type specifier" AT RUNTIME on
+  the branch that builds the string. Use `round()` / `to_char()` + `||` instead.
+
+## Supabase schema specifics
+
+- `pgcrypto` lives in the `extensions` schema. Always schema-qualify:
+  `extensions.digest(...)`, `extensions.gen_random_bytes(...)`. Do not assume
+  these resolve from `public`.
+- Inserting into `auth.users` fires `handle_new_user`, which auto-creates the
+  `profiles` and `wallets` rows. Never manually `INSERT` those (pkey conflict);
+  `UPDATE` the auto-created rows instead (e.g. to fund a test wallet).
+
+## Function exposure & privileges (PostgREST)
+
+- Every function in the `public` schema is exposed over PostgREST and EXECUTE is
+  granted to `anon`/`authenticated` by default. A `SECURITY DEFINER` function
+  with no internal auth check is therefore directly callable by any client.
+  NEVER ship an internal helper or a generic balance mutator (e.g.
+  `_credit_wallet_internal`, `rpc_credit_wallet`) that is reachable this way —
+  `REVOKE ALL ON FUNCTION ... FROM PUBLIC, anon, authenticated` (revoke from the
+  roles explicitly, not just PUBLIC). The definer `rpc_*` wrappers still call
+  helpers internally because they run as the function owner.
+- Client-facing `rpc_*` functions must guard on `auth.uid()` / `_is_admin()`
+  inside the body; expose ONLY those.
+- Views over RLS tables must be created with `security_invoker = true`, otherwise
+  they bypass the underlying table's RLS (advisor: `security_definer_view`).
+- Prefer the header `SET search_path = public, pg_temp` clause on EVERY
+  `SECURITY DEFINER` function (not just `STABLE`/`IMMUTABLE`). A body `SET` runs
+  after the `DECLARE` initializers, leaving them under the caller's search_path
+  (advisor: `function_search_path_mutable`).
+- After ANY DDL/migration, run the Supabase security advisor and resolve all
+  `ERROR`s and any `anon/authenticated`-executable unguarded definer functions
+  before considering the change done.
+
+## Persistence vs. RAISE
+
+- Side effects that MUST survive (circuit-breaker halts, audit/log rows, kill
+  switches) must not be followed by `RAISE` in the same transaction — a `RAISE`
+  rolls the whole transaction back and silently undoes them. Return a status
+  object describing the outcome instead of raising.
+
+## Conservation & balances (see also 30-money-ledger)
+
+- Every balance-moving RPC must net `Σ(deltas) = 0` per currency across user
+  wallets + system accounts. Decompose into quantized legs (user / fee /
+  insurance / dust) so the sum is exactly zero; record bad debt as a metric, not
+  as an unbalanced entry.
+- Internal system accounts may go negative for liveness; user wallets must never
+  go negative — enforce with DB `CHECK` constraints, not just app logic.
+
+## RLS & auth in SQL tests
+
+- The `postgres` superuser bypasses RLS. Do not `SET ROLE authenticated` in
+  seed/test setup unless you specifically want RLS enforced.
+- `SECURITY DEFINER` RPCs read `auth.uid()` from `request.jwt.claims`. Simulate a
+  user with `set_config('request.jwt.claims', '{"sub":"<uuid>"}', true)`.
+- For the service-role path (`auth.uid()` NULL) set claims to `'{}'` (valid
+  JSON). Never use `''` — it is invalid `jsonb` and makes `auth.uid()` throw.
+
+## Mandatory local apply gate
+
+- A migration is not "done" until it has been applied to a local Supabase via
+  `supabase db reset` (TS tests never catch apply-time SQL errors).
+- Every money/settlement/liquidation/circuit-breaker RPC must be exercised by a
+  SQL integration test that actually hits the changed branch, asserts the
+  conservation invariant and hash-chain integrity, and `ROLLBACK`s (no residue).
+  Keep these in `supabase/tests/` (`conservation_test.sql`, `hardening_test.sql`).

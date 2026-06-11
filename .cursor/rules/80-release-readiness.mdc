@@ -1,0 +1,43 @@
+---
+description: Release-readiness — no debug/test residue may ship; enforced by an automated gate
+alwaysApply: true
+---
+
+# 출시 준비 상태 규칙 (절대 위반 금지)
+
+작업이 끝난 시점에는 프로덕션(실제 서비스)에 바로 배포해도 되는 상태여야 한다.
+이 규칙은 문구가 아니라 자동 게이트(`bun run check:release`,
+`scripts/check-release.ts`)로 강제되며, `bun run check` 체인과 CI `quality` 잡에
+포함된다. 게이트가 빨간 동안에는 어떤 작업도 "완료"가 아니다.
+
+## 절대 남기지 말 것
+
+- 테스트/디버그 문구: "Test", "테스트", "Debug", "디버그", "TODO", "FIXME",
+  "임시", "임시용", "HACK", "XXX".
+- `console.log` / `console.warn` / `console.error` / `console.debug` /
+  `console.info` (제거가 원칙). 개발 진단이 꼭 필요하면 `import.meta.env.DEV`로
+  감싸고, 그래도 남겨야 하면 해당 라인에 `release-allow: <이유>`를 명시한다.
+- placeholder/미완 문구: "추후 구현", "미구현", "미정", "샘플", "예시",
+  "test mode", "dummy data", "lorem ipsum".
+- 개발자용 코멘트로 노출되는 UI(빨간 박스, "개발용"/"테스트" 배지 등)와 디버깅 UI.
+- 하드코딩된 테스트 데이터(테스트 userId/UUID, 고정 amount, mock/seed/봇/데모 데이터).
+- `describe.only` / `it.only` / `test.only` (포커스된 테스트 잔재).
+
+## 마감 기준
+
+- 모든 화면·컴포넌트는 실제 서비스에서 사용자에게 보여도 이상하지 않은 상태로 마감.
+- 모든 사용자 노출 문구는 i18n 키(한/영 혼용 금지) — `check:i18n`과 함께 통과.
+- 개발 전용 도구/패널은 반드시 `import.meta.env.DEV`로 게이팅하여 프로덕션 번들에서 제외.
+
+## Definition of Done (공통 — 모든 Phase/작업에 적용)
+
+- [ ] 화면에 테스트용 문구, 디버그 문구, placeholder 텍스트가 전혀 없음.
+- [ ] `console.log`/`console.warn`/`console.error` 등 개발용 코드가 제거(또는 DEV 게이팅)됨.
+- [ ] 하드코딩된 테스트 데이터가 없음.
+- [ ] `bun run check:release`가 green.
+- [ ] 실제 서비스에 바로 배포해도 이상하지 않은 상태로 마무리됨.
+
+## 작업 종료 시 자기점검(강제)
+
+작업을 끝낼 때마다 위 DoD를 스스로 확인하고, 위반이 있으면 보고 전에 먼저 수정한다.
+`bun run check:release`(및 전체 `bun run check`)가 통과해야만 "완료"로 보고한다.

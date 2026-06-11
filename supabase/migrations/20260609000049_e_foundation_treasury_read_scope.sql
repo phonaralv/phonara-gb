@@ -1,0 +1,28 @@
+-- ============================================================
+-- E foundation ① cleanup — scope treasury_reserves read access (audit A3-3)
+-- ============================================================
+-- Why: treasury_reserves carried a broad "authed read" RLS policy
+-- (USING auth.uid() IS NOT NULL), so EVERY logged-in user could read ALL
+-- columns — not just the proof-of-reserves-defensible figures
+-- (real_balance/buffer_pct/payout_cap_pct) but also `notes` (free-form admin
+-- memo) and `updated_by` (admin uuid). E (insurance fund) stacks its solvency
+-- foundation on this table, so the exposed surface must be deliberate.
+--
+-- Fix: drop the broad authed-read policy → treasury_reserves becomes admin-only
+-- read (the existing "admin rw" FOR ALL USING (_is_admin()) policy is now the
+-- sole client access path). This is the safest scope pre-E and breaks nothing:
+--   * No app/admin code reads treasury_reserves directly (grep: 0 hits).
+--   * The solvency gate (_assert_solvency_withdrawal_gate), rpc_run_reconciliation,
+--     and rpc_update_treasury_reserve are all SECURITY DEFINER → they read/write
+--     as the function owner and bypass RLS, so they are unaffected.
+--
+-- A public proof-of-reserves projection (currency/real_balance only) will be
+-- added intentionally WITH its UI consumer (a SECURITY DEFINER rpc_* or a public
+-- table+view), rather than re-opening the full row here. Note: a security_invoker
+-- view cannot serve a non-admin a projection the invoker is RLS-blocked from, and
+-- a security_definer view is forbidden by rule 25 — hence the deferred RPC route.
+--
+-- Local-only until Wave 12. No remote apply in this change.
+-- ============================================================
+
+DROP POLICY IF EXISTS "authed read treasury_reserves" ON treasury_reserves;

@@ -1,29 +1,4 @@
-# PHONARA Final Direction
+# FINAL_DIRECTION — 폐기됨
 
-PHONARA v2 is built from the final master plan in `docs/PHONARA_V2_MASTER_PLAN.md`.
-
-## Confirmed Product Direction
-
-- Korean-first PHON-centered platform with global expansion readiness.
-- PHON is the core platform token.
-- USDT is supported for games and trading.
-- KRW bank transfer deposit/withdrawal is supported without PG integration at launch.
-- Kakao login and PG providers are deferred expansion options.
-- User app and Admin app are separate applications.
-- Target operation model is 1-person operation with 99% automation.
-
-## Execution Principle
-
-Build in this order:
-
-1. Rules and governance.
-2. Types and domain models.
-3. Money and wallet ledger engines.
-4. Supabase schema/RLS/RPC drafts.
-5. Minimal UI and E2E.
-6. Admin automation.
-7. PWA, monitoring, and global operations.
-
-## Source of Truth
-
-If this document conflicts with `docs/PHONARA_V2_MASTER_PLAN.md`, the master plan wins.
+> 이 문서는 `docs/PHONARA_V2_MASTER_PLAN.md`의 "최종 확정 방향" 섹션으로 통합되었습니다. (2026-06-10 S1 문서 단일화)
+> 단일 진실 공급원: [`docs/PHONARA_V2_MASTER_PLAN.md`](PHONARA_V2_MASTER_PLAN.md)

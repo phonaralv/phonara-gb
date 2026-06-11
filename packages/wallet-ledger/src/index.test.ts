@@ -100,9 +100,13 @@ describe('unlock', () => {
 // ─── reverse ─────────────────────────────────────────────────────────────────
 
 describe('reverse', () => {
-  it('restores available (mirrors debit reversal)', () => {
-    const result = applyLedgerEntry(bal('70.000000', '0.000000'), 'reverse', phon('30'));
-    expect(result.available).toBe('100.000000');
+  it('rejects standalone reverse (must be paired server-side)', () => {
+    try {
+      applyLedgerEntry(bal('70.000000', '0.000000'), 'reverse', phon('30'));
+      throw new Error('expected LedgerError');
+    } catch (e) {
+      expect((e as LedgerError).code).toBe('INVALID_DIRECTION');
+    }
   });
 });
 

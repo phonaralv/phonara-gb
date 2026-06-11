@@ -18,5 +18,9 @@
   "devDependencies": {
     "typescript": "latest",
     "vitest": "latest"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0",
+    "zod": "^4.4.3"
   }
 }

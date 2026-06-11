@@ -3,6 +3,10 @@ import { useEffect } from 'react';
 import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
 import { useLedger } from '../hooks/use-wallet';
+import type { MessageKey } from '@phonara/i18n';
+import { useI18n, useT } from '../lib/i18n';
+import { Badge, Card, DataTable, EmptyState, ErrorState, Skeleton, type ColumnDef, formatMoney } from '@phonara/ui';
+import type { Tables } from '@phonara/shared-types';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -10,23 +14,57 @@ export const Route = createRoute({
   component: LedgerPage,
 });
 
-const DIRECTION_LABEL: Record<string, string> = {
-  credit: '입금', debit: '출금', lock: '잠금', unlock: '잠금해제', reverse: '취소',
-};
-const DIRECTION_COLOR: Record<string, string> = {
-  credit: '#34d399', debit: '#f87171', lock: '#facc15', unlock: '#38bdf8', reverse: '#a78bfa',
+const DIRECTION_KEY: Record<string, MessageKey> = {
+  credit: 'ledger.direction.credit',
+  debit: 'ledger.direction.debit',
+  lock: 'ledger.direction.lock',
+  unlock: 'ledger.direction.unlock',
+  reverse: 'ledger.direction.reverse',
 };
 
-function formatDate(iso: string) {
-  return new Intl.DateTimeFormat('ko-KR', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(iso));
-}
+type LedgerEntry = Tables<'wallet_ledger'>;
 
 function LedgerPage() {
+  const t = useT();
+  const { locale } = useI18n();
+  const dateFmt = new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
   const { session, loading: authLoading } = useAuth();
-  const { entries, loading } = useLedger(50);
+  const { entries, loading, error, refetch } = useLedger(50);
   const navigate = useNavigate();
+  const columns: ColumnDef<LedgerEntry>[] = [
+    {
+      key: 'datetime',
+      header: t('ledger.col.datetime'),
+      cell: (entry) => <span className="text-muted tabular-nums">{dateFmt.format(new Date(entry.created_at))}</span>,
+    },
+    {
+      key: 'type',
+      header: t('ledger.col.type'),
+      cell: (entry) => <DirectionBadge direction={entry.direction} />,
+    },
+    {
+      key: 'currency',
+      header: t('ledger.col.currency'),
+      cell: (entry) => <span className="font-bold tracking-wide">{entry.currency}</span>,
+    },
+    {
+      key: 'amount',
+      header: t('ledger.col.amount'),
+      cell: (entry) => <span className="font-semibold tabular-nums">{formatMoney(entry.amount, entry.currency)}</span>,
+    },
+    {
+      key: 'reason',
+      header: t('ledger.col.reason'),
+      cell: (entry) => <span className="text-muted">{entry.reason_code}</span>,
+    },
+    {
+      key: 'balance',
+      header: t('ledger.col.balanceAfter'),
+      cell: (entry) => <span className="text-muted tabular-nums">{formatMoney(entry.available_after, entry.currency)}</span>,
+    },
+  ];
 
   useEffect(() => {
     if (!authLoading && !session) void navigate({ to: '/login' });
@@ -41,56 +79,80 @@ function LedgerPage() {
             <span className="logo-name">PHONARA</span>
           </div>
           <nav className="dash-nav">
-            <Link to="/dashboard" className="nav-link">대시보드</Link>
+            <Link to="/dashboard" className="nav-link">{t('nav.dashboard')}</Link>
           </nav>
         </header>
 
         <section className="wallet-section">
-          <h2 className="section-title">원장 내역</h2>
+          <h2 className="section-title">{t('ledger.title')}</h2>
 
-          {loading && <div className="ledger-skeleton" />}
+          {loading && <Skeleton className="h-[240px]" data-testid="ledger-loading" />}
 
-          {!loading && entries.length === 0 && (
-            <div className="empty-state">
-              <span>📭</span>
-              <p>아직 거래 내역이 없습니다.</p>
-            </div>
+          {!loading && error && (
+            <ErrorState
+              data-testid="ledger-error"
+              title={t('wallet.loadError')}
+              description={t(error)}
+              actionLabel={t('common.retry')}
+              onAction={() => void refetch()}
+            />
           )}
 
-          {!loading && entries.length > 0 && (
-            <div className="ledger-table-wrap">
-              <table className="ledger-table">
-                <thead>
-                  <tr>
-                    <th>일시</th>
-                    <th>유형</th>
-                    <th>통화</th>
-                    <th>금액</th>
-                    <th>사유</th>
-                    <th>변동 후 잔고</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map(e => (
-                    <tr key={e.id}>
-                      <td className="ledger-date">{formatDate(e.created_at)}</td>
-                      <td>
-                        <span className="ledger-badge" style={{ color: DIRECTION_COLOR[e.direction] ?? '#fff' }}>
-                          {DIRECTION_LABEL[e.direction] ?? e.direction}
-                        </span>
-                      </td>
-                      <td className="ledger-currency">{e.currency}</td>
-                      <td className="ledger-amount">{e.amount}</td>
-                      <td className="ledger-reason">{e.reason_code}</td>
-                      <td className="ledger-balance">{e.available_after}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {!loading && !error && entries.length === 0 && (
+            <EmptyState data-testid="ledger-empty" title={t('ledger.empty')} />
+          )}
+
+          {!loading && !error && entries.length > 0 && (
+            <div className="space-y-3">
+              <div className="hidden md:block">
+                <DataTable
+                  columns={columns}
+                  data={entries}
+                  keyExtractor={(entry) => entry.id}
+                  emptyState={t('ledger.empty')}
+                  size="sm"
+                  data-testid="ledger-table"
+                />
+              </div>
+              <div className="grid gap-3 md:hidden" data-testid="ledger-mobile-list">
+                {entries.map((entry) => (
+                  <Card key={entry.id} className="grid gap-3 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <DirectionBadge direction={entry.direction} />
+                      <span className="text-xs text-muted">{dateFmt.format(new Date(entry.created_at))}</span>
+                    </div>
+                    <div className="flex items-end justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-muted">{entry.reason_code}</p>
+                        <p className="mt-1 text-sm font-bold tracking-wide text-fg">{entry.currency}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold tabular-nums text-fg">{formatMoney(entry.amount, entry.currency)}</p>
+                        <p className="mt-1 text-xs tabular-nums text-muted">
+                          {t('ledger.col.balanceAfter')}: {formatMoney(entry.available_after, entry.currency)}
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
             </div>
           )}
         </section>
       </div>
     </div>
   );
+}
+
+function DirectionBadge({ direction }: { direction: string }) {
+  const t = useT();
+  const tone =
+    direction === 'credit' || direction === 'unlock'
+      ? 'up'
+      : direction === 'debit'
+        ? 'down'
+        : direction === 'lock'
+          ? 'warning'
+          : 'neutral';
+  return <Badge tone={tone}>{DIRECTION_KEY[direction] ? t(DIRECTION_KEY[direction]!) : direction}</Badge>;
 }

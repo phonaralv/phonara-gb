@@ -23,5 +23,11 @@ export default defineConfig({
         inline: ['decimal.js'],
       },
     },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary'],
+      include: ['packages/*/src/**/*.ts'],
+      exclude: ['packages/*/src/**/*.test.ts', 'packages/*/src/**/*.d.ts'],
+    },
   },
 });

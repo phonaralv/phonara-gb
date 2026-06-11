@@ -2,21 +2,32 @@ project_id = "yocjhjsdwoijfdrehzoq"
 
 [api]
 enabled = true
-port = 54321
+port = 54444
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 
 [db]
-port = 54322
-shadow_port = 54320
-major_version = 15
+port = 54442
+shadow_port = 54443
+# Matches the linked production project (yocjhjsdwoijfdrehzoq runs PostgreSQL 17),
+# so local `db reset` and SQL tests run on the same engine as prod.
+major_version = 17
 
 [studio]
 enabled = true
-port = 54323
+port = 54445
+
+[inbucket]
+enabled = false
 
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
 additional_redirect_urls = ["http://localhost:3000", "http://localhost:3001"]
+
+# Analytics (logflare) is disabled for local dev. On Windows it requires the
+# Docker daemon to be exposed on tcp://localhost:2375, which we don't enable.
+# It is a local log viewer only and is not needed for development/testing.
+[analytics]
+enabled = false

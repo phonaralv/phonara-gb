@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/* Scan the shared design-system package. */
+@source "../../../packages/ui/src";
+
+/*
+ * PHONARA Admin design tokens — identical palette to apps/web so @phonara/ui
+ * components render consistently across web and admin surfaces.
+ */
+@theme {
+  /* Surfaces */
+  --color-bg: #050816;
+  --color-surface: #0b1220;
+  --color-surface-2: #111a2e;
+
+  /* Lines */
+  --color-border: rgba(148, 163, 184, 0.16);
+  --color-border-strong: rgba(148, 163, 184, 0.34);
+
+  /* Text */
+  --color-fg: #eaf0fb;
+  --color-muted: #93a1b8;
+
+  /* Brand */
+  --color-primary: #4f8cff;
+  --color-primary-fg: #ffffff;
+  --color-accent: #8b5cf6;
+
+  /* Market semantics */
+  --color-up: #22c55e;
+  --color-down: #ef4444;
+  --color-warning: #f59e0b;
+
+  /* Type & shape */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+}
+
+html {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}

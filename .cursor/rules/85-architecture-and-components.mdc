@@ -1,0 +1,77 @@
+---
+description: Long-term architecture and component ownership — reusable UI lives in @phonara/ui
+alwaysApply: true
+---
+
+# 아키텍처 및 컴포넌트 소유권 (장기 우선)
+
+이 프로젝트는 장기 유지보수성·확장성을 최우선한다. 단기 편의보다 미래 개발
+생산성을 우선하고, 중복을 최소화하며 재사용 컴포넌트는 중앙(`@phonara/ui`)에서
+관리한다. "일단 앱에 만들고 나중에 옮기자"는 금지 — 처음부터 옳은 위치에 만든다.
+
+## 컴포넌트 소유권 (가장 중요)
+
+- 재사용 가능성이 있는 UI 컴포넌트는 반드시 `@phonara/ui`에 만든다.
+  예: Button, Modal, ConfirmDialog, Sheet, DataTable, Toast, Badge, Tooltip.
+- 새 컴포넌트 작성 전 자문한다: ① 다른 곳에서도 쓰일 가능성이 있는가? ② `@phonara/ui`에
+  두는 것이 장기적으로 더 나은가? ③ 중복 위험이 있는가? 하나라도 "예"면 `@phonara/ui`에 만든다.
+- `apps/web`/`apps/admin` 내부 컴포넌트 생성은 **마지막 수단**이며, 해당 앱에만
+  고유한(라우트 전용, 비재사용) 경우로 한정한다.
+
+## 의존성 방향 (순수 디자인 시스템 유지)
+
+- `@phonara/ui`는 `@phonara/i18n`이나 비즈니스 로직(supabase, hooks 등)에 의존하지 않는다.
+  사용자 문구는 호출 측(앱)이 `useT()`로 번역해 **props로 주입**한다. 그래야 web/admin이
+  같은 컴포넌트를 공유한다.
+- 허용 의존성: `@phonara/money`(표시 포맷), `class-variance-authority`, `clsx`,
+  `tailwind-merge`, react/react-dom(peer).
+
+## 스타일링 (Tailwind v4 + CSS 변수)
+
+- `@phonara/ui` 컴포넌트는 `apps/web/src/theme.css`의 `@theme` 토큰만 참조한다
+  (`bg-primary`, `text-fg`, `border-border`, `bg-surface`/`bg-surface-2`, `text-muted`,
+  `bg-up`/`bg-down`, `rounded-2xl` 등). 하드코딩 색상/임의 hex 금지.
+- 토큰이 없으면 `theme.css`의 `@theme`에 먼저 추가한 뒤 사용한다(단일 디자인 소스).
+- shadcn 등 외부 Tailwind 컴포넌트를 통째로 가져오지 않는다. 필요한 부분만 직접 구현한다.
+
+## 컴포넌트 구조 규칙
+
+- 파일명 kebab-case(`confirm-dialog.tsx`), 컴포넌트 PascalCase **named export**
+  (default export 금지 — 트리셰이킹·재export·자동 import 일관성).
+- **ref 노출**: 단일 DOM 래퍼 프리미티브(Button/Card/Modal)는 루트 DOM에 `forwardRef`.
+  단일 포커스 표면을 감싸는 컴포지트(ConfirmDialog → Modal 패널)도 그 표면으로 `forwardRef`
+  한다(명령형 포커스/측정 가능). 여러 독립 파트를 노출하는 컴포지트만 ref를 생략한다.
+- **내부 ref + 외부 ref 동시 보유**가 필요하면(Modal은 포커스 트랩용 내부 `panelRef`가 있음)
+  `lib/merge-refs.ts`의 `mergeRefs(internal, forwarded)`로 합친다. 자체 ref-merge 재구현 금지.
+- **`displayName` 필수**: 모든 `forwardRef` 컴포넌트는 `X.displayName = 'X'`를 단다
+  (devtools/에러 스택 가독성). named 함수만으로 대체하지 않는다.
+- 변형은 `class-variance-authority(cva)`로 선언하고 `VariantProps<typeof xVariants>`로
+  prop 타입을 파생한다(Button 패턴). 클래스 병합은 `cn`. variant cva 객체도 export해
+  외부에서 동일 스타일을 재사용할 수 있게 한다(`buttonVariants`).
+- **타입**: prop 인터페이스는 컴포넌트 파일에 같이 두고(`XProps`), DOM 컴포넌트는
+  해당 `*HTMLAttributes<...>`를 extends 해 표준 attribute/`data-*`/`aria-*`를 그대로 받는다.
+- 현재는 flat(`components/*.tsx`). 한 컴포넌트가 서브파트/다수 변형/테스트/스토리를
+  가지게 되면 `components/<name>/{<name>.tsx,index.ts}` 폴더로 승격한다(그 전엔 flat 유지 —
+  조기 폴더화는 가치 없는 churn).
+- 공개 API는 단일 배럴 `packages/ui/src/index.ts`에서만 노출하고, 컴포넌트와 그 타입을
+  함께 export한다. 패키지는 `sideEffects: false`(CSS는 토큰 기반이라 부수효과 없음).
+- **서브패스 export(`@phonara/ui/button`)는 도입하지 않는다**: 단일 배럴 + `sideEffects:false`
+  로 번들러가 미사용분을 트리셰이킹하므로 불필요한 export 맵/경로 분기 복잡도만 늘 뿐이다.
+  배럴이 비대해지거나 무거운 의존(차트 등)을 격리해야 할 때만 서브패스를 검토한다.
+
+## 빌드/해석 경로 (실수 방지)
+
+- 타입: 루트 `tsconfig.base.json`의 `paths`가 `@phonara/ui`→`packages/ui/src`로 매핑되어
+  typecheck는 소스를 즉시 인식한다.
+- 런타임: Vite는 `package.json` `exports`(=`dist`)로 해석한다. 따라서 `@phonara/ui`에
+  컴포넌트를 추가/변경하면 앱 dev/build 전에 ui 패키지를 빌드한다(`bun run build:packages`,
+  루트 `bun run build`는 packages를 먼저 빌드함).
+- **앱에서의 import(정식 형태)**: 항상 패키지 루트에서 named import 한다 —
+  `import { ConfirmDialog, type ConfirmDialogProps } from '@phonara/ui'`. 딥 임포트
+  (`@phonara/ui/src/...`, `@phonara/ui/dist/...`) 금지. 값과 타입을 같은 구문에서
+  `type` 한정자로 함께 가져온다(`consistent-type-imports` 준수).
+
+## 보고 규칙
+
+- 새 컴포넌트를 만들 때 "왜 `@phonara/ui`인지(또는 왜 앱 내부인지)"를 한 줄로 설명하고,
+  더 나은 구조 제안이 있으면 함께 제시한다.

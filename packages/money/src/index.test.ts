@@ -13,7 +13,6 @@ import {
   isPositive,
   zero,
   format,
-  toFixed,
   toDecimal,
 } from './index';
 import type { RateSnapshot } from './index';

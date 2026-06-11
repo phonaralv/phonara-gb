@@ -1,5 +1,9 @@
 import { useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import type { MessageKey } from '@phonara/i18n'
+import { useAuth } from '../contexts/auth-context'
+import { translateError } from '../lib/translate-error'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -52,12 +56,40 @@ export const ROULETTE_LABELS = [
   '1,000 PHON 🎉',
 ] as const
 
+// ─── Query keys ───────────────────────────────────────────────
+
+export const retentionKeys = {
+  streak: (userId: string | null) => ['streak', userId] as const,
+  missions: (userId: string | null) => ['missions', userId] as const,
+  rouletteToday: (userId: string | null, date: string) => ['roulette-today', userId, date] as const,
+  welcomeClaimed: (userId: string | null) => ['welcome-claimed', userId] as const,
+  referralDashboard: (userId: string | null) => ['referral-dashboard', userId] as const,
+}
+
 // ─── Welcome Bonus hook ───────────────────────────────────────
 
 export function useWelcomeBonus() {
+  const { session } = useAuth()
+  const userId = session?.user.id ?? null
+  const qc = useQueryClient()
+
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<WelcomeBonusResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<MessageKey | null>(null)
+
+  const { data: claimedData } = useQuery({
+    queryKey: retentionKeys.welcomeClaimed(userId),
+    queryFn: async () => {
+      if (!userId) return null
+      const { data } = await supabase
+        .from('welcome_bonuses')
+        .select('phon_awarded, referral_bonus, claimed_at')
+        .eq('user_id', userId)
+        .maybeSingle()
+      return data
+    },
+    enabled: !!userId,
+  })
 
   const claimWelcomeBonus = useCallback(async () => {
     setLoading(true)
@@ -65,35 +97,30 @@ export function useWelcomeBonus() {
     try {
       const { data, error: rpcError } = await supabase.rpc('rpc_claim_welcome_bonus')
       if (rpcError) throw rpcError
-      setResult(data as unknown as WelcomeBonusResult)
-      return data as unknown as WelcomeBonusResult
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '보너스 지급 실패'
-      setError(msg)
+      const claimed = data as unknown as WelcomeBonusResult
+      setResult(claimed)
+      void qc.invalidateQueries({ queryKey: retentionKeys.welcomeClaimed(userId) })
+      return claimed
+    } catch (err) {
+      setError(translateError(err, 'error.WELCOME_CLAIM_FAILED'))
       return null
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [qc, userId])
 
   const checkClaimed = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return false
-    const { data } = await supabase
-      .from('welcome_bonuses')
-      .select('phon_awarded, referral_bonus, claimed_at')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if (data) {
+    if (!userId) return false
+    if (claimedData) {
       setResult({
         already_claimed: true,
-        phon_awarded: data.phon_awarded,
-        referral_bonus: data.referral_bonus,
+        phon_awarded: claimedData.phon_awarded,
+        referral_bonus: claimedData.referral_bonus,
       })
       return true
     }
     return false
-  }, [])
+  }, [userId, claimedData])
 
   return { claimWelcomeBonus, checkClaimed, result, loading, error }
 }
@@ -101,21 +128,30 @@ export function useWelcomeBonus() {
 // ─── Daily Claim hook ─────────────────────────────────────────
 
 export function useDailyClaim() {
+  const { session } = useAuth()
+  const userId = session?.user.id ?? null
+  const qc = useQueryClient()
+
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<DailyClaimResult | null>(null)
-  const [streak, setStreak] = useState<UserStreak | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<MessageKey | null>(null)
 
-  const fetchStreak = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase
-      .from('user_streaks')
-      .select('current_streak, longest_streak, last_claimed_date, total_phon_earned')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if (data) setStreak(data)
-  }, [])
+  const { data: streak = null } = useQuery({
+    queryKey: retentionKeys.streak(userId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('user_streaks')
+        .select('current_streak, longest_streak, last_claimed_date, total_phon_earned')
+        .eq('user_id', userId!)
+        .maybeSingle()
+      return (data as UserStreak | null) ?? null
+    },
+    enabled: !!userId,
+  })
+
+  const fetchStreak = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: retentionKeys.streak(userId) })
+  }, [qc, userId])
 
   const claimDaily = useCallback(async () => {
     setLoading(true)
@@ -125,17 +161,15 @@ export function useDailyClaim() {
       if (rpcError) throw rpcError
       const claimed = data as unknown as DailyClaimResult
       setResult(claimed)
-      // refresh streak
-      await fetchStreak()
+      void qc.invalidateQueries({ queryKey: retentionKeys.streak(userId) })
       return claimed
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '출석 체크 실패'
-      setError(msg)
+    } catch (err) {
+      setError(translateError(err, 'error.DAILY_CLAIM_FAILED'))
       return null
     } finally {
       setLoading(false)
     }
-  }, [fetchStreak])
+  }, [qc, userId])
 
   const canClaimToday = useCallback(() => {
     if (!streak?.last_claimed_date) return true
@@ -149,10 +183,29 @@ export function useDailyClaim() {
 // ─── Roulette hook ────────────────────────────────────────────
 
 export function useRoulette() {
+  const { session } = useAuth()
+  const userId = session?.user.id ?? null
+  const qc = useQueryClient()
+  const today = new Date().toISOString().slice(0, 10)
+
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<RouletteResult | null>(null)
   const [spinning, setSpinning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<MessageKey | null>(null)
+
+  const { data: spunToday = false } = useQuery({
+    queryKey: retentionKeys.rouletteToday(userId, today),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('roulette_spins')
+        .select('id')
+        .eq('user_id', userId!)
+        .eq('spun_date', today)
+        .maybeSingle()
+      return !!data
+    },
+    enabled: !!userId,
+  })
 
   const spin = useCallback(async () => {
     setLoading(true)
@@ -165,29 +218,20 @@ export function useRoulette() {
       // Simulate spin animation delay
       await new Promise(r => setTimeout(r, 2000))
       setResult(spinResult)
+      void qc.invalidateQueries({ queryKey: retentionKeys.rouletteToday(userId, today) })
       return spinResult
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '룰렛 오류'
-      setError(msg)
+    } catch (err) {
+      setError(translateError(err, 'error.ROULETTE_FAILED'))
       return null
     } finally {
       setLoading(false)
       setSpinning(false)
     }
-  }, [])
+  }, [qc, userId, today])
 
-  const canSpinToday = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return false
-    const today = new Date().toISOString().slice(0, 10)
-    const { data } = await supabase
-      .from('roulette_spins')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('spun_date', today)
-      .maybeSingle()
-    return !data
-  }, [])
+  const canSpinToday = useCallback(() => {
+    return !spunToday
+  }, [spunToday])
 
   return { spin, canSpinToday, result, spinning, loading, error }
 }
@@ -195,35 +239,34 @@ export function useRoulette() {
 // ─── Missions hook ────────────────────────────────────────────
 
 export function useMissions() {
-  const [missions, setMissions] = useState<MissionStatus[]>([])
-  const [loading, setLoading] = useState(false)
+  const { session } = useAuth()
+  const userId = session?.user.id ?? null
+  const qc = useQueryClient()
 
-  const fetchMissions = useCallback(async () => {
-    setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setLoading(false); return }
-    const { data } = await supabase
-      .from('missions')
-      .select('mission, phon_awarded, completed_at')
-      .eq('user_id', user.id)
-    if (data) setMissions(data as MissionStatus[])
-    setLoading(false)
-  }, [])
+  const { data: missions = [], isLoading: loading } = useQuery({
+    queryKey: retentionKeys.missions(userId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('missions')
+        .select('mission, phon_awarded, completed_at')
+        .eq('user_id', userId!)
+      return (data ?? []) as MissionStatus[]
+    },
+    enabled: !!userId,
+  })
 
-  const completeMission = useCallback(async (mission: string) => {
-    const { data, error } = await supabase.rpc('rpc_complete_mission', { p_mission: mission })
-    if (!error) await fetchMissions()
-    return { data, error }
-  }, [fetchMissions])
+  const fetchMissions = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: retentionKeys.missions(userId) })
+  }, [qc, userId])
 
-  return { fetchMissions, completeMission, missions, loading }
+  return { fetchMissions, missions, loading }
 }
 
 // ─── Referral hook ────────────────────────────────────────────
 
 export function useReferral() {
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<MessageKey | null>(null)
   const [success, setSuccess] = useState(false)
 
   const registerReferral = useCallback(async (code: string) => {
@@ -240,18 +283,49 @@ export function useReferral() {
         setSuccess(true)
       } else {
         setError(
-          result.reason === 'invalid_code'    ? '올바른 추천 코드가 아닙니다.' :
-          result.reason === 'already_referred' ? '이미 추천인이 등록되어 있습니다.' :
-          result.reason === 'self_referral'    ? '자기 자신은 추천할 수 없습니다.' :
-          '추천 코드 등록 실패'
+          result.reason === 'invalid_code'     ? 'error.REFERRAL_INVALID_CODE' :
+          result.reason === 'already_referred' ? 'error.REFERRAL_ALREADY' :
+          result.reason === 'self_referral'    ? 'error.REFERRAL_SELF' :
+          'error.REFERRAL_FAILED'
         )
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '추천 코드 등록 실패')
+    } catch (err) {
+      setError(translateError(err, 'error.REFERRAL_FAILED'))
     } finally {
       setLoading(false)
     }
   }, [])
 
   return { registerReferral, loading, error, success }
+}
+
+export function useReferralDashboard() {
+  const { session } = useAuth()
+  const userId = session?.user.id ?? null
+
+  return useQuery({
+    queryKey: retentionKeys.referralDashboard(userId),
+    queryFn: async () => {
+      const [{ data: profile }, { data: referrals }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', userId!)
+          .maybeSingle(),
+        supabase
+          .from('referrals')
+          .select('id, referrer_phon, rewarded_at')
+          .eq('referrer_id', userId!),
+      ])
+
+      const rows = referrals ?? []
+      return {
+        code: profile?.username ?? '',
+        pending: rows.filter((row) => !row.rewarded_at).length,
+        approved: rows.filter((row) => !!row.rewarded_at).length,
+        paidPhon: rows.filter((row) => !!row.rewarded_at).map((row) => row.referrer_phon),
+      }
+    },
+    enabled: !!userId,
+  })
 }

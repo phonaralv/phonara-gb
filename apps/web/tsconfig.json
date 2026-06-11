@@ -9,6 +9,9 @@
   "references": [
     { "path": "../../packages/i18n" },
     { "path": "../../packages/money" },
-    { "path": "../../packages/shared-types" }
+    { "path": "../../packages/shared-types" },
+    { "path": "../../packages/game-engine" },
+    { "path": "../../packages/trading-engine" },
+    { "path": "../../packages/ui" }
   ]
 }

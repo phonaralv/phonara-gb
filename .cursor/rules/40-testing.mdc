@@ -7,5 +7,27 @@ alwaysApply: true
 
 - Risky domain logic requires unit tests.
 - User-facing flows require Playwright smoke or E2E coverage.
+- E2E is not a final decoration pass. For every feature that creates, moves,
+  locks, unlocks, stakes, bets, trades, rewards, deposits, withdraws, approves,
+  rejects, authenticates, or changes permissions, the Playwright scenario must
+  be designed while the feature is designed and must be implemented before the
+  feature is marked complete.
+- Money E2E must exercise the real browser + local Supabase stack and verify
+  ledger conservation at the database level: user wallets plus system accounts
+  remain Σ=0 per currency after the flow. It must include at least one success
+  path and the relevant failure/negative path (insufficient balance, blocked
+  permission, halted feature, stale price, invalid input, duplicate request, or
+  cancelled/declined admin action).
+- Security/Admin E2E must prove both positive and negative authorization: the
+  intended role can perform the action, a normal user cannot, and an audit row
+  exists for manual/high-risk admin actions.
+- Casino/provably-fair E2E must prove bet placement, settlement, ledger
+  conservation, server-seed reveal/hash verification, client-side result
+  re-computation, and failure handling for repeated or tampered requests.
+- PWA/mobile E2E must run the relevant flow through mobile viewport assumptions,
+  safe-area layout, install/offline behavior when applicable, and no production
+  debug/test UI.
+- Phase completion and launch readiness require the relevant Feature/Money/
+  Security/Admin/PWA E2E suite to be green. If E2E fails, the phase is not done.
 - Tests must not leave persistent mock data, temporary accounts, or generated artifacts in the repo.
 - Before marking work complete, run the narrowest reliable check first, then broader checks when appropriate.

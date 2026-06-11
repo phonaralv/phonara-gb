@@ -7,10 +7,39 @@ alwaysApply: true
 
 A task is not complete until relevant gates pass:
 
+- Before adding a test, check existing unit/integration/E2E/SQL tests for the
+  same behavior. Extend the existing test when that is clearer; do not create
+  duplicate test files, duplicate fixtures, duplicate mock accounts, or duplicate
+  seed data for the same scenario.
 - TypeScript strict checks.
 - Lint and formatting checks.
 - Unit tests for domain logic.
-- E2E/smoke tests for critical flows.
+- E2E/smoke tests for critical flows. "Critical" includes every user-facing
+  auth, wallet, reward, spot/futures, staking, casino, deposit, withdrawal,
+  admin, permission, PWA, i18n mode, and mobile-shell flow.
+- Money-affecting E2E must run against the local Supabase stack and assert DB
+  invariants, not only visible text: wallet/system-account conservation per
+  currency, hash-chain integrity when applicable, idempotency on duplicate
+  submissions, and no test residue.
+- Security/Admin E2E must include positive and negative authorization plus audit
+  evidence. A hidden button is not enough; the server-trusted RPC/RLS path must
+  reject unauthorized users.
+- Casino E2E must include provably-fair verification: seed hash shown before the
+  bet, revealed seed after settlement, client recomputation matching the stored
+  outcome, and ledger conservation.
+- Full Phase E2E is mandatory before any Phase is closed or launch-readiness is
+  claimed. E2E failure blocks completion even when unit, SQL, lint, typecheck,
+  and build pass.
+- SQL migrations apply cleanly on a local Supabase (`supabase db reset`); apply-time errors are not caught by TS checks.
+- SQL integration tests pass for money/settlement/liquidation/circuit-breaker RPCs, exercising the changed branch and asserting conservation + hash-chain integrity.
 - Env and i18n coverage checks.
 - Security review for Supabase/RLS/RPC or admin changes.
 - Test residue cleanup.
+
+Run these gates yourself, automatically, without asking (Docker/local stack
+included — see `70-autonomy-and-delivery`). Additionally:
+
+- No dev/test/"test mode" UI may ship; dev-only tooling is gated behind
+  `import.meta.env.DEV`. Production builds must be clean and launch-ready.
+- After each completed task, append an implementation + error/fix entry to the
+  Build Log in `docs/PHONARA_V2_MASTER_PLAN.md`.

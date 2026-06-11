@@ -1,0 +1,125 @@
+---
+description: Standing autonomy, delivery discipline, and production-readiness contract
+alwaysApply: true
+---
+
+# Autonomy & Delivery Contract
+
+The operator granted full standing authority to lead and finish PHONARA v2
+end-to-end. This file is the operating contract for that grant.
+
+## 0. Mandatory global preflight: no duplicate work / no duplicate creation
+
+- This rule applies to EVERY task: Supabase, SQL, tests, UI/components, hooks,
+  packages, Admin, PWA, docs, plans, scripts, CI, generated assets, and cleanup.
+- Before starting ANY implementation, migration, refactor, UI task, test task,
+  Supabase operation, or plan update, first check whether the work already
+  exists, is already completed, is in progress elsewhere, or is duplicated
+  across plans/files.
+- Minimum preflight sources:
+  - `.cursor/rules/*` for non-negotiable operating rules.
+  - `docs/PHONARA_V2_MASTER_PLAN.md` including its **Build Log**.
+  - `C:\Users\PC\.cursor\plans\p0_followup_order_d22ad463.plan.md` for the
+    current tactical execution order.
+  - `docs/AI_WORKING_RULES.md` and `docs/BUILD_LOG.md` for supporting context.
+  - `git status`, recent commits, and relevant file/RPC/component searches.
+- If a task is already complete, do NOT redo it. If a file/RPC/component/test is
+  already present, improve or extend the existing artifact instead of generating
+  a parallel duplicate. Mark/record it as complete if the tracking document is
+  stale, then move to the next highest-value pending task.
+- Duplicate creation is forbidden: no duplicate migrations, plans, components,
+  hooks, stores, RPC wrappers, SQL tests, Playwright specs, fixtures, mock/seed
+  data, CI workflows, docs, or generated assets for the same purpose.
+- If two plans describe the same work, consolidate them: keep
+  `docs/PHONARA_V2_MASTER_PLAN.md` as the product/source-of-truth document and
+  `p0_followup_order_d22ad463.plan.md` as the tactical ordering document. Do not
+  create a third competing plan unless the older plan is explicitly superseded
+  in writing.
+- If current code and a plan disagree, inspect the code/tests/remote state, then
+  update the stale plan/Build Log before implementing. Never blindly implement
+  from an old plan.
+
+## 1. Standing autonomy (no per-step approval)
+
+- Do NOT ask the operator for permission to proceed, test, or apply changes.
+  Decide and act as a world-class lead engineer would.
+- Pre-authorized without asking: running local & Docker tests, `supabase db
+  reset`, applying remote migrations, deploying edge functions, installing
+  extensions, GRANT/REVOKE, refactors, dependency changes, and fixing risky or
+  buggy code discovered along the way.
+- The ONLY non-waivable constraint is the single-project Supabase lock
+  (`yocjhjsdwoijfdrehzoq`) in `20-supabase-safety`. If any instruction implies a
+  different project/ref/URL, stop and ask in writing.
+- Never weaken a security/money/conservation invariant to "make progress."
+  Correctness and solvency outrank speed.
+
+## 2. Test automatically (Docker included)
+
+- Whenever a change needs validation, run the checks yourself without asking:
+  `bun run typecheck`, `bun run test`, `bun run build`, `bun run check:i18n`,
+  `supabase db reset`, `bun run test:sql`, and the relevant Playwright E2E
+  suite (`bun run test:e2e` or a narrower `playwright test ...` target).
+- Docker is expected to be available. SQL integration tests run against the local
+  Supabase container; if `psql` is absent, `scripts/run-sql-tests.ts` falls back
+  to `docker exec`. Start/use Docker and the local stack as needed, automatically.
+- E2E is a standing delivery gate, not an optional manual check. For money,
+  auth, admin, security, casino, PWA, mobile, and i18n flows, start/use the local
+  stack and run the relevant browser scenarios yourself. If the flow touches
+  balances or settlement, assert conservation from the database as part of E2E.
+- If E2E cannot run for an environmental reason, fix the environment first
+  (Docker/local stack/env/session setup/test artifact cleanup). Do not mark the
+  task complete with "E2E not run" unless the user explicitly changes the goal
+  to investigation-only work.
+- A task is "done" only when its relevant gates (see `10-quality-gates`) pass.
+
+## 3. Build log in the master plan (mandatory, immediate)
+
+- After completing each meaningful task, immediately append a dated entry to the
+  **Build Log** section of `docs/PHONARA_V2_MASTER_PLAN.md` describing:
+  - What was implemented and how (files, RPCs, components, design decisions).
+  - Any error encountered and exactly how it was fixed (root cause → fix).
+  - Tests run and their results; gates passed.
+- The Build Log is the durable cross-session memory. Keep it accurate enough that
+  a fresh session can resume from it alone.
+
+## 4. Production cleanliness (launch-ready)
+
+- The shipped product must show NO test/dev/debug/"test mode" UI. Gate any dev-
+  only tooling behind `import.meta.env.DEV` so production builds exclude it.
+- No mock/seed/bot/demo data, no placeholder copy, no `console.log` noise, no TODO
+  banners in production paths. Remove scaffolding and residue as you go.
+- All user-facing copy is i18n-keyed (Korean lives only in the i18n catalog).
+  English mode must never show Korean. `bun run check:i18n` must pass before a
+  frontend area is considered done.
+
+## 5. Commits (local only, at milestones)
+
+- Commit locally ONLY at meaningful milestones (a coherent feature/fix that is
+  green), never trivially. Do not push to any remote unless explicitly asked.
+- Use clear conventional messages; never commit secrets (`.env`, keys).
+
+## 6. Session continuity & performance hygiene
+
+- Keep the Build Log current so work survives a chat reset. If the conversation
+  grows large/laggy, consolidate state into the Build Log + TODOs so a new
+  session can continue seamlessly, then proceed.
+- Delete generated junk, dead files, and lag-inducing residue after each phase
+  (`bun run clean` where applicable). Keep the repo lean.
+
+## 7. Naming & structure (world-class defaults)
+
+- TypeScript: `camelCase` vars/functions, `PascalCase` types/components,
+  `SCREAMING_SNAKE_CASE` consts; files `kebab-case.ts(x)`; hooks `use-*`.
+- SQL: client RPCs `rpc_*`, internal helpers `_*` (revoked from anon/PUBLIC),
+  stable UPPER_SNAKE error codes translated client-side.
+- Keep the `apps/web` / `apps/admin` / `packages/*` boundary clean; shared UI in
+  `@phonara/ui`, shared money in `@phonara/money`, copy in `@phonara/i18n`.
+
+## 8. Admin design principles
+
+- Admin targets 1-person operation with ~99% automation: automate the normal
+  path, surface only exception queues to a human.
+- Keep Admin lightweight, but structure permissions/audit so it expands to a
+  role-based team without a rewrite (owner/finance/risk/support/operator/viewer).
+- Every manual admin action requires a reason + audit log; high-risk actions
+  require confirmation; kill switches are simple, visible, auditable.

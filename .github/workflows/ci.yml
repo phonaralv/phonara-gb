@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # C0 — required gates that are green today.
+  quality:
+    name: typecheck / lint / test / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check:env
+      - run: bun run check:i18n
+      - run: bun run check:release
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+      - run: bun run check:pwa
+
+  # C0b — Supabase security advisor gate (rules 00/10/25): the linked project's
+  # security advisor must have 0 ERROR. Uses the Management API via a CI secret.
+  # On fork PRs (no secret) the script skips and the job stays green.
+  advisors:
+    name: supabase security advisors (0 ERROR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Supabase advisor gate
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: bun run check:advisors
+
+  # Advisory until repo-wide Prettier churn is intentionally normalized.
+  # i18n is now required in the `quality` job.
+  advisory:
+    name: format (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: prettier format check
+        continue-on-error: true
+        run: bun run format:check
+
+  # C1 — SQL apply-gate: applies every migration on a fresh local Supabase
+  # (db reset) and runs the SQL integration tests (conservation + hardening).
+  # TS checks never catch apply-time SQL errors; this is the mandatory gate
+  # from .cursor/rules 10/25.
+  sql:
+    name: supabase db reset + SQL tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: bun install --frozen-lockfile
+      - name: Start local Supabase stack
+        run: supabase start
+      - name: Apply all migrations on a fresh database
+        run: supabase db reset
+      - name: Run SQL integration tests (conservation + hardening)
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: bun run test:sql
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --no-backup
+
+  # C2 — E2E gate (rules 10/40/70): runs the Playwright money/auth flows against
+  # a fresh local Supabase stack in a real browser, asserting DB-level
+  # conservation (Σ=0 per currency). This is a standing, required delivery gate.
+  e2e:
+    name: playwright e2e (local stack + DB conservation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      - name: Start local Supabase stack
+        run: supabase start
+      - name: Apply all migrations on a fresh database
+        run: supabase db reset
+      - name: Install Playwright browser (chromium)
+        run: bunx playwright install --with-deps chromium
+      - name: Run Playwright E2E (Playwright boots the web dev server)
+        run: bun run test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --no-backup

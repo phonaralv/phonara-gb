@@ -6,21 +6,41 @@ alwaysApply: true
 # Core Rules
 
 - Treat `docs/PHONARA_V2_MASTER_PLAN.md` as the source of truth.
-- Before starting core engine or high-risk work, stop and tell the user: "AI 모델을 바꿔주세요."
+- Before ANY work, run the duplicate-prevention preflight in
+  `70-autonomy-and-delivery`: confirm the task/RPC/component/migration/test/plan
+  is not already implemented, not already tracked, and not duplicated elsewhere.
+  Duplicate work and duplicate generated artifacts are forbidden.
 - Prefer small, tested, auditable changes.
 - Implement engines before decorative UI.
 - Preserve a clear boundary between `apps/web`, `apps/admin`, and `packages/*`.
 - Do not add compatibility shims for unshipped work on this branch; keep the branch clean and direct.
 
-## Model-Switch Stop Rule
+## Standing autonomy (operator-granted)
 
-Stop before:
+The operator has granted the agent full standing authority to lead and finish the
+platform end-to-end WITHOUT per-step approval — including running local/Docker
+tests, applying remote Supabase migrations, deploying edge functions, and fixing
+risky/buggy areas on its own judgment. Do not pause to ask for permission. The
+only hard constraint that survives this grant is the single-project lock in
+`20-supabase-safety` (project `yocjhjsdwoijfdrehzoq` only). See
+`70-autonomy-and-delivery` for the full operating contract.
 
-- Money/Decimal engine implementation.
-- Wallet ledger implementation.
-- Trading engine implementation.
-- Game engine or provably fair implementation.
-- Supabase schema/RLS/RPC migration application.
+## High-Risk Work (extra rigor, proceed autonomously)
+
+The agent proceeds directly through high-risk work. The following areas demand
+extra rigor — draft first, validate locally, test the changed branch, run the
+advisor, THEN apply autonomously (no approval needed):
+
+- Money/Decimal engine, wallet ledger, conservation logic.
+- Trading engine, liquidation, game/provably-fair engine.
+- Supabase schema/RLS/RPC migrations.
+- anon/public/role privilege changes (GRANT/REVOKE).
 - Admin permission, withdrawal, or kill-switch logic.
 - Security-sensitive auth/session changes.
-- Any task that can affect balances, settlement, or withdrawals.
+- Anything that can affect balances, settlement, or withdrawals.
+
+For these, the mandatory gates still apply and are non-negotiable: local
+`supabase db reset` must pass, money/settlement/liquidation/circuit-breaker RPCs
+must be exercised by a `supabase/tests/*.sql` integration test that asserts
+conservation (Σ=0) and hash-chain integrity and `ROLLBACK`s, and the Supabase
+security advisor must be clean (0 ERROR) before the change is considered done.

@@ -1,8 +1,16 @@
-import { createRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { createRoute, Link, useNavigate } from '@tanstack/react-router';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
-import { sendMagicLink } from '../lib/auth';
+import { signInWithPassword, sendMagicLink } from '../lib/auth';
+import {
+  authErrorMessageKey,
+  isValidEmail,
+  type AuthFieldErrorCode,
+} from '../lib/auth-error-key';
+import { Button, Card, Input } from '@phonara/ui';
+import { useT } from '../lib/i18n';
+import { AuthShell } from '../components/auth-shell';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -10,12 +18,20 @@ export const Route = createRoute({
   component: LoginPage,
 });
 
+type ViewState =
+  | { kind: 'idle' }
+  | { kind: 'submitting' }
+  | { kind: 'magicSending' }
+  | { kind: 'magicSent' }
+  | { kind: 'error'; code: AuthFieldErrorCode };
+
 function LoginPage() {
+  const t = useT();
   const { session, loading } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [password, setPassword] = useState('');
+  const [state, setState] = useState<ViewState>({ kind: 'idle' });
 
   useEffect(() => {
     if (!loading && session) {
@@ -23,80 +39,192 @@ function LoginPage() {
     }
   }, [session, loading, navigate]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setStatus('loading');
-    setErrorMsg('');
-    const { error } = await sendMagicLink(email);
-    if (error) {
-      setErrorMsg(error);
-      setStatus('error');
-    } else {
-      setStatus('sent');
+  const isBusy = state.kind === 'submitting' || state.kind === 'magicSending';
+  const errorKey = state.kind === 'error' ? authErrorMessageKey(state.code) : null;
+
+  async function handlePasswordLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isBusy) return;
+    const trimmed = email.trim();
+    if (!trimmed) return setState({ kind: 'error', code: 'emailRequired' });
+    if (!isValidEmail(trimmed)) return setState({ kind: 'error', code: 'emailInvalid' });
+    if (!password) return setState({ kind: 'error', code: 'passwordRequired' });
+
+    setState({ kind: 'submitting' });
+    const result = await signInWithPassword(trimmed, password);
+    if (result.ok) {
+      void navigate({ to: '/dashboard' });
+      return;
     }
+    setState({ kind: 'error', code: result.code });
+  }
+
+  async function handleMagicLink() {
+    if (isBusy) return;
+    const trimmed = email.trim();
+    if (!trimmed) return setState({ kind: 'error', code: 'emailRequired' });
+    if (!isValidEmail(trimmed)) return setState({ kind: 'error', code: 'emailInvalid' });
+
+    setState({ kind: 'magicSending' });
+    const { error } = await sendMagicLink(trimmed);
+    if (error) {
+      setState({ kind: 'error', code: 'generic' });
+      return;
+    }
+    setState({ kind: 'magicSent' });
   }
 
   if (loading) {
     return (
-      <div className="shell">
-        <span className="spinner" aria-label="Loading" />
-      </div>
+      <AuthShell>
+        <Card className="auth-card p-6">
+          <p className="text-sm text-muted" role="status" aria-live="polite">
+            {t('auth.entry.shared.statusLoading')}
+          </p>
+        </Card>
+      </AuthShell>
     );
   }
 
-  if (status === 'sent') {
+  if (state.kind === 'magicSent') {
     return (
-      <div className="shell">
-        <div className="auth-card">
-          <div className="auth-icon">✉️</div>
-          <h1>이메일을 확인하세요</h1>
-          <p className="auth-desc">
-            <strong>{email}</strong>으로 로그인 링크를 보냈습니다.<br />
-            링크를 클릭하면 자동으로 로그인됩니다.
+      <AuthShell>
+        <Card className="auth-card p-6">
+          <h2 className="text-base font-semibold text-fg">
+            {t('auth.entry.shared.magicLinkSentTitle')}
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            {t('auth.entry.shared.magicLinkSentBody')}
           </p>
-          <button className="btn-ghost" onClick={() => setStatus('idle')}>
-            다시 시도
-          </button>
-        </div>
-      </div>
+          <Button
+            type="button"
+            variant="secondary"
+            className="auth-secondary-action mt-6 w-full"
+            onClick={() => setState({ kind: 'idle' })}
+          >
+            {t('auth.entry.shared.back')}
+          </Button>
+        </Card>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="shell">
-      <div className="auth-card">
-        <div className="auth-logo">
-          <span className="logo-mark">P</span>
-        </div>
-        <h1>PHONARA에 오신 것을 환영합니다</h1>
-        <p className="auth-desc">이메일로 비밀번호 없이 로그인합니다.</p>
+    <AuthShell>
+      <Card className="auth-card p-6">
+        <form onSubmit={handlePasswordLogin} noValidate className="space-y-4">
+          <div className="space-y-1.5">
+            <label htmlFor="login-email" className="text-sm font-medium text-fg">
+              {t('auth.entry.shared.emailLabel')}
+            </label>
+            <div className="auth-field">
+              <span className="auth-field-icon auth-field-icon-email" aria-hidden="true" />
+              <Input
+                id="login-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                inputMode="email"
+                spellCheck={false}
+                autoCapitalize="off"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={t('auth.entry.shared.emailPlaceholder')}
+                invalid={!!errorKey}
+                aria-describedby={errorKey ? 'login-error' : undefined}
+                className="auth-input h-12"
+                required
+              />
+            </div>
+          </div>
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <label htmlFor="email" className="sr-only">이메일</label>
-          <input
-            id="email"
-            type="email"
-            placeholder="이메일 주소 입력"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-            autoFocus
-            className="input"
-          />
-          {status === 'error' && <p className="error-msg">{errorMsg}</p>}
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={status === 'loading'}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor="login-password" className="text-sm font-medium text-fg">
+                {t('auth.entry.shared.passwordLabel')}
+              </label>
+              <Link
+                to="/reset-password"
+                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {t('auth.entry.login.forgot')}
+              </Link>
+            </div>
+            <div className="auth-field">
+              <span className="auth-field-icon auth-field-icon-lock" aria-hidden="true" />
+              <Input
+                id="login-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t('auth.entry.shared.passwordPlaceholder')}
+                invalid={!!errorKey}
+                aria-describedby={errorKey ? 'login-error' : undefined}
+                className="auth-input h-12"
+                required
+              />
+            </div>
+          </div>
+
+          <p
+            id="login-error"
+            role="alert"
+            aria-live="polite"
+            className="min-h-5 text-sm text-down"
           >
-            {status === 'loading' ? '전송 중…' : '로그인 링크 받기'}
-          </button>
+            {errorKey ? t(errorKey) : ''}
+          </p>
+
+          <Button type="submit" disabled={isBusy} className="auth-cta mt-2 w-full">
+            {state.kind === 'submitting'
+              ? t('auth.entry.login.submitting')
+              : t('auth.entry.login.submit')}
+          </Button>
         </form>
 
-        <p className="auth-hint">
-          링크를 클릭하면 자동으로 가입 및 로그인됩니다.
+        <div className="my-6 flex items-center gap-3" aria-hidden="true">
+          <span className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted">
+            {t('auth.entry.shared.or')}
+          </span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={isBusy}
+          onClick={handleMagicLink}
+          className="auth-secondary-action w-full"
+        >
+          {state.kind === 'magicSending'
+            ? t('auth.entry.shared.magicLinkSending')
+            : t('auth.entry.shared.magicLinkSecondary')}
+        </Button>
+
+      </Card>
+      <footer className="mt-6 text-center text-sm text-muted">
+        <p>
+          {t('auth.entry.login.noAccount')}{' '}
+          <Link
+            to="/signup"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            {t('auth.entry.login.toSignup')}
+          </Link>
         </p>
-      </div>
-    </div>
+        <p className="mt-3 text-xs">
+          <Link to="/terms" className="hover:text-fg hover:underline">
+            {t('auth.entry.shared.termsLink')}
+          </Link>
+          {' · '}
+          <Link to="/privacy" className="hover:text-fg hover:underline">
+            {t('auth.entry.shared.privacyLink')}
+          </Link>
+        </p>
+      </footer>
+    </AuthShell>
   );
 }

@@ -19,4 +19,4 @@ PHONARA casino games require server authority and provably fair verification.
 - PHON and USDT betting support.
 - Bet settlement through wallet ledger only.
 
-Actual game engine implementation must pause for model switch confirmation before coding begins.
+Implementation follows the integrated execution contract (Wave 1 engine, Wave 2 SQL settle ADR-004). See `docs/PHONARA_V2_MASTER_PLAN.md` Build Log and `docs/HANDOVER_PHASE4_CASINO.md`.

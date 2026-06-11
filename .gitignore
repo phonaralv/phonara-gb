@@ -14,3 +14,12 @@ test-results
 !.env.example
 .DS_Store
 Thumbs.db
+
+# Supabase CLI local state
+supabase/.branches
+supabase/.temp
+
+# E2E ephemeral session (contains access tokens — never commit)
+tests/e2e/.auth.json
+tests/e2e/.admin-auth.json
+tests/e2e/.*auth*.json

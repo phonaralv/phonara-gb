@@ -1,9 +1,6 @@
 import Decimal from 'decimal.js';
 import type { Currency } from '@phonara/shared-types';
-
-// ─── Configuration ───────────────────────────────────────────────────────────
-
-Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
+import './configure-decimal';
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
@@ -187,4 +184,5 @@ export function format(amount: MoneyAmount): string {
     .toFixed();
 }
 
+export { configureDecimal, Decimal } from './configure-decimal';
 export { DECIMALS };

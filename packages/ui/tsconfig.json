@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuild/ui.tsbuildinfo"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../money" },
+    { "path": "../shared-types" }
+  ]
+}

@@ -1,0 +1,29 @@
+-- ============================================================
+-- E foundation ① cleanup — unify the solvency withdrawal gate (audit A1-4 / A2-6)
+-- ============================================================
+-- Why: two solvency gates coexisted, which is a foot-gun for the upcoming E
+-- (insurance fund) work — a new RPC could wire the WRONG one.
+--
+--   * _assert_withdrawal_gate(currency, TEXT)  — VOLATILE, defined in 000026.
+--       ORPHAN. Zero production callers (grep: only solvency_reconciliation_test
+--       Test 5/6 referenced it). Implements a DIFFERENT, never-shipped solvency
+--       model: real_balance ≥ Σ(user balances) × (1 + buffer_pct/100).
+--   * _assert_solvency_withdrawal_gate(currency) — STABLE, defined in 000033.
+--       AUTHORITATIVE. Called by rpc_request_withdrawal (000033/000035). Model:
+--       Σ(withdrawable) ≤ attested × (1 − buffer), requires a fresh (<24h)
+--       matching reconciliation and NOT system_readonly. Covered by
+--       phase5_gates_test (Gate 3/4/5) and phase5_withdrawal_test.
+--
+-- Fix: DROP the orphan so exactly one solvency gate remains. The orphan's
+-- behavioural test (the old Test 5/6) is replaced in solvency_reconciliation_test
+-- by a structural guard asserting the single-gate invariant; the authoritative
+-- gate keeps its behavioural coverage in phase5_gates_test.
+--
+-- Safe to drop: REVOKEd from all client roles, no SQL/app/RPC caller, and the
+-- generated database.types.ts is regenerated at Wave 12 (it is already stale vs
+-- local-only migrations 25–47, so no type change is needed here).
+--
+-- Local-only until Wave 12. No remote apply in this change.
+-- ============================================================
+
+DROP FUNCTION IF EXISTS _assert_withdrawal_gate(currency, TEXT);

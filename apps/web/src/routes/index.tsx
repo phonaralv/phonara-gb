@@ -2,6 +2,7 @@ import { createRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
+import { Card, Skeleton } from '@phonara/ui';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -24,7 +25,10 @@ function IndexRedirect() {
 
   return (
     <div className="shell">
-      <span className="spinner" aria-label="Loading" />
+      <Card className="grid w-full max-w-sm gap-4 p-5" aria-busy="true">
+        <Skeleton className="h-5 w-28" />
+        <Skeleton className="h-20" />
+      </Card>
     </div>
   );
 }

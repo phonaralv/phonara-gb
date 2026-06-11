@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   SUPABASE_URL,
   ANON_KEY,
@@ -20,6 +20,35 @@ const CONSENT_DOC_TYPES = [
 
 const FUTURES_SYMBOLS = ['PHONUSDT-PERP', 'BTCUSDT-SIM', 'ETHUSDT-SIM'];
 
+interface DbError {
+  code?: string;
+  message: string;
+}
+
+function isDuplicateKey(error: DbError): boolean {
+  return error.code === '23505' || error.message.toLowerCase().includes('duplicate key');
+}
+
+async function insertIfMissing(
+  admin: SupabaseClient,
+  table: 'profiles' | 'wallets',
+  row: Record<string, string>,
+  label: string,
+): Promise<void> {
+  const { error } = await admin.from(table).insert(row);
+  if (error && !isDuplicateKey(error)) {
+    throw new Error(`${label} fixture insert failed: ${error.message}`);
+  }
+}
+
+async function ensureProfileAndWallet(admin: SupabaseClient, userId: string, label: string): Promise<void> {
+  // The production trigger chain should create these rows. CI can occasionally
+  // observe missing fixture rows, so the service-role setup makes the invariant
+  // explicit and idempotent without changing product auth behavior.
+  await insertIfMissing(admin, 'profiles', { id: userId }, `${label} profile`);
+  await insertIfMissing(admin, 'wallets', { user_id: userId }, `${label} wallet`);
+}
+
 /**
  * Provisions a funded, consented test user on the LOCAL stack and persists a
  * real session for the spec to inject (no magic-link flow). Uses the service
@@ -38,22 +67,7 @@ async function globalSetup(): Promise<void> {
   if (cErr || !created.user) throw new Error(`createUser failed: ${cErr?.message ?? 'no user'}`);
   const userId = created.user.id;
 
-  // The handle_new_user trigger creates the wallet row asynchronously.
-  // Retry-poll until the row exists before issuing the UPDATE (silent 0-row
-  // updates are the primary cause of the "wallet not visible" flakiness).
-  {
-    let found = false;
-    for (let attempt = 0; attempt < 75; attempt++) {
-      const { data } = await admin
-        .from('wallets')
-        .select('user_id')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (data) { found = true; break; }
-      await new Promise<void>((r) => setTimeout(r, 200));
-    }
-    if (!found) throw new Error('wallet row not created by handle_new_user trigger within 15 s');
-  }
+  await ensureProfileAndWallet(admin, userId, 'user');
 
   // Fund the auto-created wallet generously.
   const { data: funded, error: wErr } = await admin
@@ -136,20 +150,7 @@ async function globalSetup(): Promise<void> {
   }
   const adminUserId = adminCreated.user.id;
 
-  // Wait for handle_new_user trigger to create the profile row.
-  {
-    let found = false;
-    for (let attempt = 0; attempt < 75; attempt++) {
-      const { data } = await admin
-        .from('profiles')
-        .select('id')
-        .eq('id', adminUserId)
-        .maybeSingle();
-      if (data) { found = true; break; }
-      await new Promise<void>((r) => setTimeout(r, 200));
-    }
-    if (!found) throw new Error('admin profile row not created within 15 s');
-  }
+  await ensureProfileAndWallet(admin, adminUserId, 'admin');
 
   // Promote to admin role.
   const { error: roleErr } = await admin

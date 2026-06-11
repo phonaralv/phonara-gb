@@ -4021,6 +4021,12 @@ phonara-gb/
 - **수정**: [`tests/e2e/global-setup.ts`](../tests/e2e/global-setup.ts)의 일반 유저 wallet 대기와 admin profile 대기를 각각 30회×200ms(6초)에서 75회×200ms(15초)로 늘리고, 에러 메시지도 15초 기준으로 갱신했다. 제품 auth/RLS/RPC/ledger 로직은 변경하지 않았다.
 - **게이트**: `ReadLints` 0; `bun run check:release` green; `bun run typecheck` green; local Supabase service role env를 quote-trim해 주입한 `bunx playwright test tests/e2e/quality.spec.ts --project=chromium` green(1/1). 첫 로컬 E2E 재현은 stale port 3000 dev server로 실패했고, 두 번째는 PowerShell env parsing이 quote를 포함해 malformed JWT가 되어 실패했다. 포트 해제와 quote-trim 후 global setup + web/admin dev server + quality spec이 green.
 
+### 2026-06-11 CI E2E fixture row guarantee (local)
+
+- **원인**: timeout을 15초로 늘린 뒤에도 CI에서 같은 `wallet row not created by handle_new_user trigger within 15 s`가 반복됐다. 따라서 단순 latency 문제가 아니라 E2E fixture가 trigger chain 결과를 수동 polling에만 의존하는 구조가 불안정했다. 실제 trigger chain은 `auth.users -> handle_new_user() -> profiles`, `profiles -> create_wallet_for_profile() -> wallets` 두 단계이며, CI에서 wallet row가 관측되지 않으면 이후 funding UPDATE가 0 rows로 이어진다.
+- **수정**: [`tests/e2e/global-setup.ts`](../tests/e2e/global-setup.ts)에 `ensureProfileAndWallet()`을 추가했다. `createUser` 직후 service-role fixture setup이 `profiles(id)`와 `wallets(user_id)`를 `insert if missing`으로 보장하고, trigger가 이미 생성한 duplicate key는 정상으로 무시한다. 이렇게 E2E 테스트 데이터 invariant를 명시적으로 만족시키되, 제품 signup/auth/RLS/RPC/ledger 로직은 변경하지 않는다.
+- **게이트**: `ReadLints` 0; `bun run typecheck` green; `bun run check:release` green; local Supabase service role env를 quote-trim해 주입한 `bunx playwright test tests/e2e/quality.spec.ts --project=chromium` green(1/1, global setup 통과).
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).

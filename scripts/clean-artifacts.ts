@@ -8,6 +8,13 @@ const rootTargets = [
   'coverage',
   'playwright-report',
   'test-results',
+  'supabase/.temp',
+  'supabase/.branches',
+];
+
+const ephemeralAuthPatterns = [
+  'tests/e2e/.auth.json',
+  'tests/e2e/.admin-auth.json',
 ];
 
 const workspaceArtifactNames = [
@@ -41,7 +48,7 @@ function workspaceTargets() {
   });
 }
 
-const targets = [...rootTargets, ...workspaceTargets()];
+const targets = [...rootTargets, ...workspaceTargets(), ...ephemeralAuthPatterns];
 
 for (const target of targets) {
   rmSync(target, { recursive: true, force: true });

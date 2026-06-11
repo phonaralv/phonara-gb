@@ -1,0 +1,26 @@
+# Dependencies and package manager caches (largest index noise)
+node_modules/
+.bun/
+
+# Build and test artifacts
+dist/
+build/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.turbo/
+.vite/
+*.tsbuildinfo
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# E2E ephemeral auth (tokens — also in .gitignore)
+tests/e2e/.auth.json
+tests/e2e/.admin-auth.json
+tests/e2e/.*auth*.json
+
+# Lockfile is generated; exclude from semantic index (still on disk for installs)
+bun.lock

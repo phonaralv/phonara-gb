@@ -154,14 +154,16 @@ END;
 $$;
 ROLLBACK;
 
--- ── Test 6: service_role cannot insert wallet_ledger rows directly ──────────
+-- ── Test 6: direct wallet_ledger INSERTs are blocked ────────────────────────
 BEGIN;
 DO $$
 DECLARE
   v_uid UUID := gen_random_uuid();
   v_wallet_id UUID;
-  v_blocked BOOLEAN := FALSE;
+  v_service_role_blocked BOOLEAN := FALSE;
+  v_owner_guard_blocked BOOLEAN := FALSE;
   v_msg TEXT;
+  v_state TEXT;
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'guard_ledger_' || v_uid::TEXT || '@t.local', NOW(), NOW());
@@ -177,15 +179,33 @@ BEGIN
       '0.000000', '0.000000', '1.000000', '0.000000', 'direct_insert'
     );
   EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
-    IF v_msg = 'ledger_write_not_allowed' THEN
-      v_blocked := TRUE;
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT, v_state = RETURNED_SQLSTATE;
+    IF v_msg = 'ledger_write_not_allowed' OR v_state = '42501' THEN
+      v_service_role_blocked := TRUE;
     END IF;
   END;
   RESET ROLE;
 
-  ASSERT v_blocked,
-    format('service_role direct wallet_ledger INSERT must raise ledger_write_not_allowed, got: %s', coalesce(v_msg, '<no error>'));
+  ASSERT v_service_role_blocked,
+    format('service_role direct wallet_ledger INSERT must be blocked by grant belt or ledger guard, got: %s', coalesce(v_msg, '<no error>'));
+
+  BEGIN
+    INSERT INTO wallet_ledger (
+      wallet_id, user_id, idempotency_key, direction, currency, amount,
+      available_before, locked_before, available_after, locked_after, reason_code
+    ) VALUES (
+      v_wallet_id, v_uid, 'owner-direct-ledger:' || v_uid::TEXT, 'credit', 'PHON', '1.000000',
+      '0.000000', '0.000000', '1.000000', '0.000000', 'direct_insert'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'ledger_write_not_allowed' THEN
+      v_owner_guard_blocked := TRUE;
+    END IF;
+  END;
+
+  ASSERT v_owner_guard_blocked,
+    format('privileged direct wallet_ledger INSERT must raise ledger_write_not_allowed, got: %s', coalesce(v_msg, '<no error>'));
 
   RAISE NOTICE 'WALLET LEDGER DIRECT INSERT GUARD OK';
 END;

@@ -4362,6 +4362,12 @@ phonara-gb/
 - **오류→수정**: 첫 clean reset은 container 초기화 단계에서 상세 없이 실패했으나 `supabase db reset --debug` 재실행은 성공했다. 첫 SQL GREEN run은 기존 `phase5_gates_test.sql` sanctions-pending surface test가 pending 전 deposit request 생성 fixture에 clear screening을 넣지 않아 `sanctions_stale`로 실패했다. 해당 테스트 의도는 pending 상태에서 deposit credit이 막히는지 보는 것이므로 request 생성 전 clear screening을 추가한 뒤 31/31 green. 첫 E2E는 local service-role env 미주입으로 browser `setSession` timeout, env 주입 후 deposit success path만 새 clear screening precondition 누락으로 ref가 표시되지 않았다. E2E deposit fixture에 clear screening row를 추가해 7/7 green.
 - **게이트**: `supabase db reset --debug` green(000001~000072), `bun run test:sql` **31/31** green, `supabase db lint --local --level error` 0 issue, `bun run typecheck` green, `bun run lint` green, `bun run check:i18n` green, `bun run check:release` green, `bunx playwright test tests/e2e/phase5-wave9.spec.ts --project=chromium` green(7/7), `ReadLints` 0. MCP Supabase tool descriptor 부재로 remote advisor 호출은 수행하지 않았다. 리모트 apply 0.
 
+### 2026-06-12 CI SQL gate follow-up — wallet_ledger direct insert guard expectation (local)
+
+- **원인**: GitHub Actions `supabase db reset + SQL tests` job이 [`wallet_ledger_write_guard_test.sql`](../supabase/tests/wallet_ledger_write_guard_test.sql) Test 6에서 실패했다. 현재 schema에서는 `service_role` direct `wallet_ledger INSERT`가 table GRANT belt에서 먼저 `permission denied for table wallet_ledger`로 차단될 수 있는데, test는 trigger-level `ledger_write_not_allowed`만 허용해 실제로는 더 강한 차단을 실패로 판정했다.
+- **수정**: 제품 migration/RPC/GRANT는 변경하지 않았다. Test 6을 `service_role` 경로는 SQLSTATE `42501` grant denial 또는 `ledger_write_not_allowed` 둘 다 허용하도록 정렬했고, 같은 transaction에서 DB owner/privileged direct INSERT가 trigger guard의 `ledger_write_not_allowed`를 실제로 발생시키는 별도 단언을 추가했다. 즉 권한을 넓히지 않고 grant belt와 trigger guard를 각각 검증한다.
+- **검증**: reset 전 기존 local stack 상태로 `bun run test:sql`을 실행했을 때 unrelated stateful failures가 있었지만, 수정 대상 `wallet_ledger_write_guard_test.sql`은 PASS. CI fresh 조건으로 `supabase db reset; if ($LASTEXITCODE -eq 0) { bun run test:sql } else { exit $LASTEXITCODE }`를 실행해 `supabase db reset` green 및 SQL **31/31** green 확인. `bun run check:release` green, `ReadLints` 0. 리모트 apply 0.
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).

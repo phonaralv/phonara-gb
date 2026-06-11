@@ -4002,6 +4002,13 @@ phonara-gb/
 - **게이트**: `ReadLints` 0; `bun --filter @phonara/web build` green(기존 large-chunk/PWA inlineDynamicImports 경고만); `bun run check:i18n` green; `bun run check:release` green; auth CSS hardcoded hex/rgba search 0. Auth/DB/RLS/RPC/money/ledger 변경 없음, 리모트 apply 0, push 0.
 - **6기준/UI 상태**: Clarity 6/6 — PHON reward headline + primary CTA clear. Speed 5/6 — CSS-only motion/icons, but existing app bundle large-chunk warning remains. Trust 5/6 — real-data-based FOMO policy respected. Conversion 6/6 — 52/54px touch targets and stronger CTA. Safety 6/6 — auth logic only, no money/security action change. Consistency 5/6 — tokenized colors and no new package, but `styles.css` grew to 707 lines and should be reduced in later design-system cleanup.
 
+### 2026-06-11 CI RLS follow-up — _is_admin definer fix (local)
+
+- **원인**: CI/E2E anon 경로에서 `app_config` RLS 정책 평가 중 admin-only policy가 `_is_admin()`을 호출했고, 기존 `_is_admin()`은 invoker 권한 SQL 함수라 현재 role이 `profiles` 조회 권한을 충분히 갖지 못하는 환경에서 `permission denied for table profiles`가 발생했다. `GRANT SELECT ON profiles TO anon`은 프로필 표면을 넓히는 잘못된 우회이므로 사용하지 않았다.
+- **수정**: 신규 [`20260609000054_is_admin_security_definer.sql`](../supabase/migrations/20260609000054_is_admin_security_definer.sql)로 `_is_admin()`을 `SECURITY DEFINER STABLE SET search_path = public, pg_temp`로 재정의했다. 함수는 `public.profiles`에서 `auth.uid()`와 동일한 row의 `role='admin'`만 확인한다. `PUBLIC` execute를 회수하고 RLS 정책 평가에 필요한 `anon`, `authenticated`, `service_role`에만 EXECUTE를 부여했다.
+- **회귀 테스트**: [`anon_lockdown_test.sql`](../supabase/tests/anon_lockdown_test.sql)에 `_is_admin.prosecdef = true`, anon claims `{}`에서 `profiles` row 0, public `app_config` key 1행 읽기 성공을 검증하는 케이스를 추가했다. 이 테스트는 profiles를 broad open하지 않고도 anon-evaluated RLS가 permission error 없이 작동함을 증명한다.
+- **게이트**: `supabase db reset --debug` green(000001~000054 적용); `SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54442/postgres bun run test:sql` green(26/26); `bun run check:release` green; `git diff --check` green. 리모트 apply 0.
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).

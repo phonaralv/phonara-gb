@@ -112,6 +112,39 @@ BEGIN
 END;
 $$;
 
+-- ── Test 1c-2: _is_admin is safe inside anon-evaluated RLS policies ──────────
+DO $$
+DECLARE
+  v_anon_public_config INT;
+  v_anon_profile_rows INT;
+BEGIN
+  ASSERT EXISTS (
+    SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname = '_is_admin'
+       AND p.prosecdef = TRUE
+  ), '_is_admin must be SECURITY DEFINER so anon RLS policy evaluation never needs profiles SELECT';
+
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  SET ROLE anon;
+  SELECT COUNT(*) INTO v_anon_profile_rows
+    FROM profiles;
+  SELECT COUNT(*) INTO v_anon_public_config
+    FROM app_config
+   WHERE key = 'feature_withdrawal_enabled';
+  RESET ROLE;
+
+  ASSERT v_anon_profile_rows = 0,
+    format('anon must not read profile rows without a matching auth.uid(), got %s', v_anon_profile_rows);
+  ASSERT v_anon_public_config = 1,
+    format('anon must read public app_config rows without profiles permission errors, got %s', v_anon_public_config);
+
+  RAISE NOTICE 'IS_ADMIN DEFINER OK — anon app_config RLS works while profiles stays closed';
+END;
+$$;
+
 -- ── Test 1d: dead generic wallet mutators are fully removed ─────────────────
 DO $$
 BEGIN

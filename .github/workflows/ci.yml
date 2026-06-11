@@ -87,7 +87,7 @@ jobs:
         run: supabase db reset
       - name: Run SQL integration tests (conservation + hardening)
         env:
-          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54442/postgres
         run: bun run test:sql
       - name: Stop local Supabase stack
         if: always()
@@ -112,6 +112,14 @@ jobs:
         run: supabase start
       - name: Apply all migrations on a fresh database
         run: supabase db reset
+      - name: Export local Supabase E2E credentials
+        run: |
+          eval "$(supabase status -o env)"
+          {
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "VITE_SUPABASE_URL=http://127.0.0.1:54444"
+            echo "VITE_SUPABASE_ANON_KEY=$ANON_KEY"
+          } >> "$GITHUB_ENV"
       - name: Install Playwright browser (chromium)
         run: bunx playwright install --with-deps chromium
       - name: Run Playwright E2E (Playwright boots the web dev server)

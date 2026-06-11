@@ -116,7 +116,8 @@ $$;
 DO $$
 DECLARE
   v_anon_public_config INT;
-  v_anon_profile_rows INT;
+  v_anon_profile_rows INT := 0;
+  v_profile_blocked BOOLEAN := FALSE;
 BEGIN
   ASSERT EXISTS (
     SELECT 1
@@ -129,13 +130,20 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', '{}', true);
   SET ROLE anon;
-  SELECT COUNT(*) INTO v_anon_profile_rows
-    FROM profiles;
+  BEGIN
+    SELECT COUNT(*) INTO v_anon_profile_rows
+      FROM profiles;
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_profile_blocked := TRUE;
+    v_anon_profile_rows := 0;
+  END;
   SELECT COUNT(*) INTO v_anon_public_config
     FROM app_config
    WHERE key = 'feature_withdrawal_enabled';
   RESET ROLE;
 
+  ASSERT v_profile_blocked OR v_anon_profile_rows = 0,
+    'anon profiles access must be blocked by table privileges or RLS';
   ASSERT v_anon_profile_rows = 0,
     format('anon must not read profile rows without a matching auth.uid(), got %s', v_anon_profile_rows);
   ASSERT v_anon_public_config = 1,

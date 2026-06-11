@@ -4009,6 +4009,12 @@ phonara-gb/
 - **회귀 테스트**: [`anon_lockdown_test.sql`](../supabase/tests/anon_lockdown_test.sql)에 `_is_admin.prosecdef = true`, anon claims `{}`에서 `profiles` row 0, public `app_config` key 1행 읽기 성공을 검증하는 케이스를 추가했다. 이 테스트는 profiles를 broad open하지 않고도 anon-evaluated RLS가 permission error 없이 작동함을 증명한다.
 - **게이트**: `supabase db reset --debug` green(000001~000054 적용); `SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54442/postgres bun run test:sql` green(26/26); `bun run check:release` green; `git diff --check` green. 리모트 apply 0.
 
+### 2026-06-11 CI RLS follow-up — anon profiles test correction (local)
+
+- **원인**: 위 회귀 테스트가 `SET ROLE anon; SELECT COUNT(*) FROM profiles`를 직접 실행하면서, 일부 CI fresh DB 권한 상태에서는 `0 rows`가 아니라 `permission denied for table profiles`로 먼저 차단됐다. 이는 profiles를 broad open하지 않는 안전한 상태인데 테스트가 실패로 해석했다.
+- **수정**: [`anon_lockdown_test.sql`](../supabase/tests/anon_lockdown_test.sql)의 profiles 직접 read를 `EXCEPTION WHEN insufficient_privilege`로 감싸고, permission-denied 또는 RLS 0행 모두 “anon profiles 접근 차단”으로 인정하도록 보정했다. 같은 DO block 안에서 public `app_config.feature_withdrawal_enabled` read는 계속 성공해야 하므로 `_is_admin()` definer fix의 원래 목적은 유지된다.
+- **게이트**: `SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54442/postgres bun run test:sql` green(26/26); `supabase db reset --debug` 후 동일 SQL suite green(26/26); `bun run check:release` green.
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).

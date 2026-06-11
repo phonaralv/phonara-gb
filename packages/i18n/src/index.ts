@@ -32,6 +32,9 @@ export const koMessages = {
     '보안 확인이 끝날 때까지 입출금, 거래, 스테이킹, 게임 참여가 제한됩니다. 조회와 로그아웃은 계속 가능합니다.',
   'account.restricted.appeal': '이의 신청',
   'account.restricted.appealEmail': 'support@phonara.com',
+  'realtime.banner.title': '실시간 연결 확인 중',
+  'realtime.banner.description':
+    '가격과 포지션 업데이트 연결이 끊겼습니다. 재연결될 때까지 주문 버튼이 비활성화됩니다.',
 
   // ── Navigation ────────────────────────────────────────────────────────────────
   'nav.dashboard': '대시보드',
@@ -420,6 +423,8 @@ export const koMessages = {
   'trade.dataStatus.errorDescription': '시장 데이터를 불러오지 못했습니다. 다시 시도해 주세요.',
   'trade.dataStatus.staleDescription': '실시간 업데이트가 지연되고 있습니다. 주문 전 현재가를 다시 확인하세요.',
   'trade.dataStatus.syncingDescription': '실시간 시장 데이터를 갱신하고 있습니다.',
+  'trade.dataStatus.realtimeDisconnectedDescription':
+    '실시간 연결이 끊겨 주문을 받을 수 없습니다. 재연결 후 다시 시도해 주세요.',
   'trade.orderBook.title': '오더북',
   'trade.orderBook.referenceBadge': '참고',
   'trade.orderBook.disclosure': '하우스 제공 유동성 · 참고용입니다. 실제 정산은 서버 기준 현재가로 처리됩니다.',
@@ -847,6 +852,9 @@ export const enMessages: Record<keyof typeof koMessages, string> = {
     'Deposits, withdrawals, trading, staking, and games are restricted while security review is in progress. Viewing and sign-out remain available.',
   'account.restricted.appeal': 'Appeal',
   'account.restricted.appealEmail': 'support@phonara.com',
+  'realtime.banner.title': 'Checking realtime connection',
+  'realtime.banner.description':
+    'Price and position updates are disconnected. Order buttons are disabled until realtime reconnects.',
 
   'nav.dashboard': 'Dashboard',
   'nav.trade': 'Trade',
@@ -1228,6 +1236,8 @@ export const enMessages: Record<keyof typeof koMessages, string> = {
   'trade.dataStatus.errorDescription': 'Market data could not be loaded. Try again.',
   'trade.dataStatus.staleDescription': 'Realtime updates are delayed. Recheck the mark price before ordering.',
   'trade.dataStatus.syncingDescription': 'Refreshing realtime market data.',
+  'trade.dataStatus.realtimeDisconnectedDescription':
+    'Realtime connection is disconnected. Orders are unavailable until it reconnects.',
   'trade.orderBook.title': 'Order book',
   'trade.orderBook.referenceBadge': 'Reference',
   'trade.orderBook.disclosure': 'House-provided reference liquidity. Actual settlement uses the server mark price.',

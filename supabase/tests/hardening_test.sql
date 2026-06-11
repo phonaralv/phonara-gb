@@ -526,6 +526,8 @@ DECLARE
   v_uid    UUID := gen_random_uuid();
   v_pos    JSONB;
   v_pid    UUID;
+  v_first_breach_at TIMESTAMPTZ;
+  v_first_breach_tick_id UUID;
   v_before NUMERIC;
   v_after  NUMERIC;
   v_status position_status;
@@ -555,13 +557,35 @@ BEGIN
   -- Gap-down crash below the liquidation price (direct update simulates a gap that
   -- bypasses the per-tick circuit breaker). Equity goes negative → bad debt path.
   UPDATE oracle_prices SET price = '0.009000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', '0.009000', NOW() + INTERVAL '1 second');
 
-  -- Service-role sweep
+  -- First service-role sweep records the breach but does not liquidate yet.
   PERFORM set_config('request.jwt.claims', '{}', true);
   v_res := rpc_run_liquidations();
 
+  SELECT status
+    INTO v_status
+    FROM futures_positions
+   WHERE id = v_pid;
+  ASSERT v_status = 'open', 'first breach tick must not liquidate immediately: ' || v_status::TEXT;
+  ASSERT (v_res->>'liquidated')::INT = 0,
+    'first breach sweep must record only, got: ' || v_res::TEXT;
+
+  EXECUTE 'SELECT first_breach_tick_id, first_breach_at FROM futures_positions WHERE id = $1'
+    INTO v_first_breach_tick_id, v_first_breach_at
+    USING v_pid;
+  ASSERT v_first_breach_tick_id IS NOT NULL AND v_first_breach_at IS NOT NULL,
+    'first breach state must be recorded on futures_positions';
+
+  -- A second consecutive breach tick liquidates.
+  UPDATE oracle_prices SET price = '0.008900', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', '0.008900', NOW() + INTERVAL '2 seconds');
+  v_res := rpc_run_liquidations();
+
   SELECT status INTO v_status FROM futures_positions WHERE id = v_pid;
-  ASSERT v_status = 'liquidated', 'position not liquidated: ' || v_status::TEXT;
+  ASSERT v_status = 'liquidated', 'position not liquidated after second breach tick: ' || v_status::TEXT;
 
   SELECT (payload->>'bad_debt')::NUMERIC INTO v_baddebt
   FROM position_ledger WHERE position_id = v_pid AND event = 'auto_liquidate' LIMIT 1;
@@ -621,13 +645,23 @@ BEGIN
   v_pid := (v_pos->>'position_id')::UUID;
 
   UPDATE oracle_prices SET price = '0.009000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', '0.009000', NOW() + INTERVAL '1 second');
 
   -- Service-role context (auth.uid() = NULL), exactly like the cron session.
   PERFORM set_config('request.jwt.claims', '{}', true);
   PERFORM _run_liquidations_logged();
 
   SELECT status INTO v_status FROM futures_positions WHERE id = v_pid;
-  ASSERT v_status = 'liquidated', 'logged wrapper did not liquidate: ' || v_status::TEXT;
+  ASSERT v_status = 'open', 'logged wrapper first breach tick must not liquidate: ' || v_status::TEXT;
+
+  UPDATE oracle_prices SET price = '0.008900', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', '0.008900', NOW() + INTERVAL '2 seconds');
+  PERFORM _run_liquidations_logged();
+
+  SELECT status INTO v_status FROM futures_positions WHERE id = v_pid;
+  ASSERT v_status = 'liquidated', 'logged wrapper did not liquidate after second breach tick: ' || v_status::TEXT;
 
   SELECT count(*) INTO v_logged FROM liquidation_run_log WHERE liquidated >= 1;
   ASSERT v_logged >= 1, 'liquidation_run_log did not record the actionable sweep';

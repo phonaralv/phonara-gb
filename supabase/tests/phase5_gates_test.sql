@@ -238,6 +238,8 @@ BEGIN
   UPDATE treasury_reserves SET real_balance = '999999999.000000' WHERE currency = 'PHON';
   INSERT INTO exchange_rate_snapshots (base_currency, quote_currency, rate, source, is_active)
   VALUES ('PHON', 'KRW', '10.000000', 'test', TRUE);
+  INSERT INTO sanctions_screenings (user_id, status, screened_at)
+  VALUES (v_uid, 'clear', NOW());
   PERFORM set_config('request.jwt.claims', '{}', true);
   PERFORM rpc_run_reconciliation();
 

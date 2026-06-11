@@ -44,6 +44,9 @@ BEGIN
      SET is_active = FALSE
    WHERE base_currency = 'PHON' AND quote_currency = 'KRW';
 
+  INSERT INTO sanctions_screenings (user_id, status, screened_at)
+  VALUES (v_uid, 'clear', NOW());
+
   SELECT phon_available INTO v_phon FROM wallets WHERE user_id = v_uid;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
@@ -73,6 +76,48 @@ BEGIN
            v_phon, (SELECT phon_available FROM wallets WHERE user_id = v_uid));
 
   RAISE NOTICE 'KRW DEPOSIT RATE GATE OK — missing active PHON/KRW rate rejects request with no ledger movement';
+END;
+$$;
+ROLLBACK;
+
+-- ── Test 0b: KRW deposit request requires clear sanctions screening ──────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid       UUID := gen_random_uuid();
+  v_msg       TEXT;
+  v_blocked   BOOLEAN := FALSE;
+  v_rows      INT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated',
+          'dep_no_screening_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+
+  UPDATE app_config SET value = 'false'
+    WHERE key IN ('system_halt', 'system_readonly', 'consent_gate_enabled');
+  UPDATE app_config SET value = 'true'
+    WHERE key = 'feature_deposit_enabled';
+
+  INSERT INTO exchange_rate_snapshots (base_currency, quote_currency, rate, source, is_active)
+  VALUES ('PHON', 'KRW', '10.000000', 'test', TRUE);
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
+  BEGIN
+    PERFORM rpc_create_krw_deposit_request('10000', 'dep-no-screening-' || v_uid::TEXT);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'sanctions_stale' THEN v_blocked := TRUE; END IF;
+  END;
+
+  ASSERT v_blocked,
+    format('deposit request without clear screening must raise sanctions_stale, got %s', COALESCE(v_msg, '<none>'));
+
+  SELECT count(*) INTO v_rows
+    FROM krw_deposit_requests
+   WHERE user_id = v_uid;
+  ASSERT v_rows = 0, format('no-screening deposit request must create no rows, got %s', v_rows);
+
+  RAISE NOTICE 'KRW DEPOSIT SCREENING GATE OK — no screening row blocks deposit request without residue';
 END;
 $$;
 ROLLBACK;

@@ -18,12 +18,15 @@ DECLARE
   v_success_at TIMESTAMPTZ;
   v_single_symbol TEXT := 'OPS_SINGLE_SOURCE';
   v_fallback_symbol TEXT := 'OPS_GLOBAL_FALLBACK';
+  v_house_symbol TEXT := 'PHONUSDT-PERP';
+  v_house_user UUID := gen_random_uuid();
   v_price TEXT;
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES
     (v_admin, 'authenticated', 'authenticated', 'ops_alerts_admin_' || v_admin::TEXT || '@test.local', NOW(), NOW()),
-    (v_user, 'authenticated', 'authenticated', 'ops_alerts_user_' || v_user::TEXT || '@test.local', NOW(), NOW());
+    (v_user, 'authenticated', 'authenticated', 'ops_alerts_user_' || v_user::TEXT || '@test.local', NOW(), NOW()),
+    (v_house_user, 'authenticated', 'authenticated', 'ops_house_exposure_' || v_house_user::TEXT || '@test.local', NOW(), NOW());
 
   UPDATE profiles SET role = 'admin' WHERE id = v_admin;
 
@@ -223,7 +226,83 @@ BEGIN
   ASSERT v_price = '10.000001',
     format('symbol without per-symbol min_sources key must fall back to global=1, got price=%s result=%s', v_price, v_res);
 
-  RAISE NOTICE 'OPS ALERTS OK — snapshot refactor, sync dedupe, ack, resolve, oracle single-source alert, and per-symbol min_sources verified';
+  -- House exposure is detection-only: exceeding net long-short exposure opens
+  -- one warning and duplicate active alerts are skipped.
+  DELETE FROM ops_alerts WHERE dedupe_key = 'house_exposure_breach:' || v_house_symbol;
+  INSERT INTO app_config (key, value, description, is_public)
+  VALUES (
+    'house_exposure_alert_threshold:' || v_house_symbol,
+    '100.000000',
+    'Test threshold for house exposure alert.',
+    FALSE
+  )
+  ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value,
+        description = EXCLUDED.description,
+        is_public = FALSE,
+        updated_at = NOW();
+
+  UPDATE app_config SET value = 'false' WHERE key IN ('system_halt', 'system_readonly');
+  UPDATE app_config SET value = 'true' WHERE key IN ('feature_futures_enabled', 'consent_gate_enabled');
+  UPDATE rpc_rate_limit_configs SET capacity = 100, refill_rate = 100 WHERE rpc_name = 'rpc_open_futures_position';
+  UPDATE futures_markets
+     SET is_active = TRUE,
+         max_leverage = '10',
+         max_user_positions = 100,
+         max_open_interest = '1000000.000000',
+         min_notional = '1.000000'
+   WHERE symbol = v_house_symbol;
+  UPDATE market_circuit_breakers
+     SET is_halted = FALSE, max_tick_pct = 10.0, staleness_seconds = 300, updated_at = NOW()
+   WHERE symbol = v_house_symbol;
+  INSERT INTO oracle_prices (symbol, price, updated_at)
+  VALUES (v_house_symbol, '0.010000', NOW())
+  ON CONFLICT (symbol) DO UPDATE SET price = '0.010000', updated_at = NOW();
+  INSERT INTO user_consents (user_id, doc_type, doc_version, accepted)
+  SELECT v_house_user, doc_type::consent_doc_type, 'test', TRUE
+  FROM unnest(ARRAY['terms_of_service','privacy_policy','risk_disclosure','age_verification']) AS doc_type
+  ON CONFLICT DO NOTHING;
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
+  UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_house_user;
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_house_user::TEXT)::TEXT, true);
+  PERFORM rpc_open_futures_position(
+    v_house_symbol,
+    'long',
+    'USDT',
+    '20.000000',
+    '6',
+    NULL,
+    NULL,
+    'house-exposure-a-' || v_house_user::TEXT
+  );
+
+  SELECT COUNT(*)::INT INTO v_count
+  FROM ops_alerts
+  WHERE dedupe_key = 'house_exposure_breach:' || v_house_symbol
+    AND source_check_id = 'house_exposure_breach'
+    AND status = 'open'
+    AND severity = 'warning';
+  ASSERT v_count = 1, format('house exposure breach alert must open once, got %s', v_count);
+
+  PERFORM rpc_open_futures_position(
+    v_house_symbol,
+    'long',
+    'USDT',
+    '20.000000',
+    '6',
+    NULL,
+    NULL,
+    'house-exposure-b-' || v_house_user::TEXT
+  );
+
+  SELECT COUNT(*)::INT INTO v_count
+  FROM ops_alerts
+  WHERE dedupe_key = 'house_exposure_breach:' || v_house_symbol
+    AND status IN ('open', 'acknowledged');
+  ASSERT v_count = 1, format('house exposure breach alert must dedupe active rows, got %s', v_count);
+
+  RAISE NOTICE 'OPS ALERTS OK — snapshot refactor, sync dedupe, ack, resolve, oracle single-source alert, per-symbol min_sources, and house exposure warning verified';
 END;
 $$;
 

@@ -203,10 +203,12 @@ DO $$
 DECLARE
   v_uid UUID := gen_random_uuid();
   v_open JSONB;
+  v_manual JSONB;
   v_pos_id UUID;
   v_liq NUMERIC;
   v_tick NUMERIC := 0.000001;
   v_blocked BOOLEAN;
+  v_status position_status;
   v_msg TEXT;
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
@@ -253,23 +255,35 @@ BEGIN
   END;
   ASSERT v_blocked, format('long one tick above liq must not liquidate, got %s', COALESCE(v_msg, '<none>'));
 
-  -- Long: exact liquidation price liquidates.
+  -- Long instant predicate: exact/below are breached, above is not.
   UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
   v_open := rpc_open_futures_position('PHONUSDT-PERP', 'long', 'USDT', '100.000000', '10', NULL, NULL,
     'liq-long-exact-' || v_uid::TEXT);
   v_pos_id := (v_open->>'position_id')::UUID;
   v_liq := (v_open->>'liquidation_price')::NUMERIC;
-  UPDATE oracle_prices SET price = _fmt6(v_liq), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
-  PERFORM rpc_liquidate_position(v_pos_id);
+  ASSERT _is_liquidation_breached('long', v_liq, v_liq),
+    'long exact liquidation predicate must be true';
+  ASSERT _is_liquidation_breached('long', v_liq, v_liq - v_tick),
+    'long one tick below liquidation predicate must be true';
+  ASSERT NOT _is_liquidation_breached('long', v_liq, v_liq + v_tick),
+    'long one tick above liquidation predicate must be false';
 
-  -- Long: one tick below liquidation price liquidates.
-  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
-  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'long', 'USDT', '100.000000', '10', NULL, NULL,
-    'liq-long-below-' || v_uid::TEXT);
-  v_pos_id := (v_open->>'position_id')::UUID;
-  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  -- SQL execution buffer: first breached tick records only; second breached tick settles.
+  UPDATE oracle_prices SET price = _fmt6(v_liq), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', _fmt6(v_liq), NOW() + INTERVAL '1 second');
+  v_manual := rpc_liquidate_position(v_pos_id);
+  ASSERT v_manual->>'reason' = 'liquidation_buffer_pending',
+    format('long first breached tick must return pending buffer state, got %s', v_manual);
+  SELECT status INTO v_status FROM futures_positions WHERE id = v_pos_id;
+  ASSERT v_status = 'open', 'long first breached tick must leave position open';
+
   UPDATE oracle_prices SET price = _fmt6(v_liq - v_tick), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', _fmt6(v_liq - v_tick), NOW() + INTERVAL '2 seconds');
   PERFORM rpc_liquidate_position(v_pos_id);
+  SELECT status INTO v_status FROM futures_positions WHERE id = v_pos_id;
+  ASSERT v_status = 'liquidated', 'long second breached tick must liquidate';
 
   -- Short: one tick below liquidation price is not liquidatable.
   UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
@@ -287,25 +301,34 @@ BEGIN
   END;
   ASSERT v_blocked, format('short one tick below liq must not liquidate, got %s', COALESCE(v_msg, '<none>'));
 
-  -- Short: exact liquidation price liquidates.
+  -- Short instant predicate: exact/above are breached, below is not.
   UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
   v_open := rpc_open_futures_position('PHONUSDT-PERP', 'short', 'USDT', '100.000000', '10', NULL, NULL,
     'liq-short-exact-' || v_uid::TEXT);
   v_pos_id := (v_open->>'position_id')::UUID;
   v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  ASSERT _is_liquidation_breached('short', v_liq, v_liq),
+    'short exact liquidation predicate must be true';
+  ASSERT _is_liquidation_breached('short', v_liq, v_liq + v_tick),
+    'short one tick above liquidation predicate must be true';
+  ASSERT NOT _is_liquidation_breached('short', v_liq, v_liq - v_tick),
+    'short one tick below liquidation predicate must be false';
+
   UPDATE oracle_prices SET price = _fmt6(v_liq), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
-  PERFORM rpc_liquidate_position(v_pos_id);
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', _fmt6(v_liq), NOW() + INTERVAL '3 seconds');
+  v_manual := rpc_liquidate_position(v_pos_id);
+  ASSERT v_manual->>'reason' = 'liquidation_buffer_pending',
+    format('short first breached tick must return pending buffer state, got %s', v_manual);
 
-  -- Short: one tick above liquidation price liquidates.
-  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
-  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'short', 'USDT', '100.000000', '10', NULL, NULL,
-    'liq-short-above-' || v_uid::TEXT);
-  v_pos_id := (v_open->>'position_id')::UUID;
-  v_liq := (v_open->>'liquidation_price')::NUMERIC;
   UPDATE oracle_prices SET price = _fmt6(v_liq + v_tick), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  INSERT INTO price_ticks (symbol, price, created_at)
+  VALUES ('PHONUSDT-PERP', _fmt6(v_liq + v_tick), NOW() + INTERVAL '4 seconds');
   PERFORM rpc_liquidate_position(v_pos_id);
+  SELECT status INTO v_status FROM futures_positions WHERE id = v_pos_id;
+  ASSERT v_status = 'liquidated', 'short second breached tick must liquidate';
 
-  RAISE NOTICE 'FUTURES LIQUIDATION BOUNDARY OK — exact and +/- one tick decisions match TS rules';
+  RAISE NOTICE 'FUTURES LIQUIDATION BOUNDARY OK — instant predicate parity and SQL two-tick buffer verified';
 END;
 $$;
 

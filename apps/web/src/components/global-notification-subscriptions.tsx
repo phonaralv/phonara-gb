@@ -11,6 +11,7 @@ import {
   priceRef,
   useNotificationStore,
 } from '../stores/notifications';
+import { useRealtimeConnectionStore } from '../stores/realtime';
 
 function compareDecimal(left: string, right: string): number | null {
   try {
@@ -36,6 +37,7 @@ export function GlobalNotificationSubscriptions() {
   const markPriceAlertTriggered = useNotificationStore((s) => s.markPriceAlertTriggered);
   const seedPositionBaselines = useNotificationStore((s) => s.seedPositionBaselines);
   const resetBaselinesForUser = useNotificationStore((s) => s.resetBaselinesForUser);
+  const setRealtimeStatus = useRealtimeConnectionStore((s) => s.setStatus);
   const { positions } = useFuturesPositions();
   const priceAlertSymbol = priceAlert?.symbol ?? null;
 
@@ -98,7 +100,7 @@ export function GlobalNotificationSubscriptions() {
     if (fallbackPrice) handlePriceAlertChange(fallbackPrice);
   }, [fallbackPrice, handlePriceAlertChange]);
 
-  useRealtime({
+  const positionsRealtime = useRealtime({
     table: 'futures_positions',
     filter: userId ? `user_id=eq.${userId}` : undefined,
     event: '*',
@@ -130,7 +132,7 @@ export function GlobalNotificationSubscriptions() {
     },
   });
 
-  useRealtime({
+  const oracleRealtime = useRealtime({
     table: 'oracle_prices',
     event: 'UPDATE',
     enabled: !!priceAlert?.enabled,
@@ -139,6 +141,14 @@ export function GlobalNotificationSubscriptions() {
       if (row) handlePriceAlertChange(row);
     },
   });
+
+  useEffect(() => {
+    setRealtimeStatus('positions', positionsRealtime.status);
+  }, [positionsRealtime.status, setRealtimeStatus]);
+
+  useEffect(() => {
+    setRealtimeStatus('oraclePrices', oracleRealtime.status);
+  }, [oracleRealtime.status, setRealtimeStatus]);
 
   return null;
 }

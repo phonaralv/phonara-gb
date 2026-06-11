@@ -62,7 +62,99 @@ END;
 $$;
 ROLLBACK;
 
--- ── Test 3: service_role cannot insert wallet_ledger rows directly ──────────
+-- ── Test 3: service_role cannot create a wallet with non-zero balances ──────
+BEGIN;
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+  v_blocked BOOLEAN := FALSE;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated', 'guard_insert_nonzero_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+
+  DELETE FROM wallets WHERE user_id = v_uid;
+
+  SET LOCAL ROLE service_role;
+  BEGIN
+    INSERT INTO wallets (user_id, phon_available)
+    VALUES (v_uid, '1.000000');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'ledger_write_not_allowed' THEN
+      v_blocked := TRUE;
+    END IF;
+  END;
+  RESET ROLE;
+
+  ASSERT v_blocked,
+    format('service_role direct non-zero wallet INSERT must raise ledger_write_not_allowed, got: %s', coalesce(v_msg, '<no error>'));
+
+  RAISE NOTICE 'WALLET NON-ZERO INSERT GUARD OK';
+END;
+$$;
+ROLLBACK;
+
+-- ── Test 4: service_role can create a zero-balance wallet row ────────────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated', 'guard_insert_zero_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+
+  DELETE FROM wallets WHERE user_id = v_uid;
+
+  SET LOCAL ROLE service_role;
+  INSERT INTO wallets (user_id)
+  VALUES (v_uid);
+  RESET ROLE;
+
+  ASSERT EXISTS (
+    SELECT 1
+      FROM wallets
+     WHERE user_id = v_uid
+       AND phon_available::NUMERIC = 0
+       AND phon_locked::NUMERIC = 0
+       AND usdt_available::NUMERIC = 0
+       AND usdt_locked::NUMERIC = 0
+       AND krw_available::NUMERIC = 0
+       AND krw_locked::NUMERIC = 0
+  ), 'service_role zero-balance wallet INSERT should remain allowed';
+
+  RAISE NOTICE 'WALLET ZERO INSERT OK';
+END;
+$$;
+ROLLBACK;
+
+-- ── Test 5: signup trigger still creates a zero-balance wallet ───────────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated', 'guard_signup_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+
+  ASSERT EXISTS (
+    SELECT 1
+      FROM wallets
+     WHERE user_id = v_uid
+       AND phon_available::NUMERIC = 0
+       AND phon_locked::NUMERIC = 0
+       AND usdt_available::NUMERIC = 0
+       AND usdt_locked::NUMERIC = 0
+       AND krw_available::NUMERIC = 0
+       AND krw_locked::NUMERIC = 0
+  ), 'create_wallet_for_profile should create exactly one zero-balance wallet without ledger_write GUC';
+
+  RAISE NOTICE 'SIGNUP ZERO WALLET REGRESSION OK';
+END;
+$$;
+ROLLBACK;
+
+-- ── Test 6: service_role cannot insert wallet_ledger rows directly ──────────
 BEGIN;
 DO $$
 DECLARE
@@ -100,7 +192,7 @@ END;
 $$;
 ROLLBACK;
 
--- ── Test 4: duplicate prev_hash branches are structurally rejected ───────────
+-- ── Test 7: duplicate prev_hash branches are structurally rejected ───────────
 BEGIN;
 DO $$
 DECLARE

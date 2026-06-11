@@ -7,6 +7,7 @@ import { env } from '../lib/env';
 import { useT } from '../lib/i18n';
 import { Button, Card, buttonVariants } from '@phonara/ui';
 import { GlobalNotificationSubscriptions } from '../components/global-notification-subscriptions';
+import { useRealtimeConnectionStore } from '../stores/realtime';
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -17,8 +18,25 @@ function RootLayout() {
     <AuthProvider>
       <GlobalNotificationSubscriptions />
       <AccountRestrictionBanner />
+      <RealtimeConnectionBanner />
       <Outlet />
     </AuthProvider>
+  );
+}
+
+function RealtimeConnectionBanner() {
+  const t = useT();
+  const disconnected = useRealtimeConnectionStore((s) => s.disconnected);
+
+  if (!disconnected) return null;
+
+  return (
+    <div className="fixed inset-x-0 top-20 z-40 px-4 pt-3" data-testid="realtime-disconnect-banner">
+      <Card className="mx-auto flex max-w-4xl flex-col gap-1 border-warning/40 bg-surface p-4 shadow-lg">
+        <p className="text-sm font-semibold text-fg">{t('realtime.banner.title')}</p>
+        <p className="text-xs text-muted">{t('realtime.banner.description')}</p>
+      </Card>
+    </div>
   );
 }
 

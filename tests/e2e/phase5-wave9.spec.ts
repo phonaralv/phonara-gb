@@ -357,6 +357,12 @@ test.describe.serial('Wave 9.1 — deposits, withdrawals, gates', () => {
       legal_name: 'E2E Test User',
       activity_frozen: false,
     }).eq('id', auth.userId);
+    await admin.from('sanctions_screenings').insert({
+      user_id: auth.userId,
+      status: 'clear',
+      screened_at: new Date().toISOString(),
+      source: 'e2e',
+    });
 
     await admin.from('app_config').update({ value: 'false' }).in('key', ['system_halt', 'system_readonly']);
     await admin.from('exchange_rate_snapshots').insert({

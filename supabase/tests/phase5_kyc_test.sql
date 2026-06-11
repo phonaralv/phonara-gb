@@ -53,6 +53,22 @@ BEGIN
      AND payload->>'document_last4_masked' = '****';
   ASSERT v_queue_count = 1, 'KYC submission did not create masked admin queue item';
 
+  SELECT COUNT(*) INTO v_queue_count
+    FROM sanctions_screenings
+   WHERE user_id = v_uid
+     AND status = 'pending'
+     AND source = 'kyc_submission';
+  ASSERT v_queue_count = 1, 'KYC submit should create one pending sanctions screening for a new user';
+
+  SELECT COUNT(*) INTO v_queue_count
+    FROM admin_review_queue
+   WHERE user_id = v_uid
+     AND entity_type = 'sanctions_screening'
+     AND queue_type = 'sanctions_screening'
+     AND status = 'pending'
+     AND payload->>'trigger' = 'kyc_submission';
+  ASSERT v_queue_count = 1, 'KYC submit should enqueue sanctions screening review without blocking onboarding';
+
   v_res := rpc_submit_kyc(
     jsonb_build_object(
       'legal_name', 'Kim Minsoo',
@@ -94,7 +110,7 @@ BEGIN
      AND entity_id = v_submission;
   ASSERT v_audit_count = 1, 'KYC approval audit log missing';
 
-  RAISE NOTICE 'KYC SUBMISSION APPROVAL OK — queue masked, admin approved, withdrawal gate unlocked';
+  RAISE NOTICE 'KYC SUBMISSION APPROVAL OK — queue masked, screening queued, admin approved, withdrawal gate unlocked';
 END;
 $$;
 ROLLBACK;

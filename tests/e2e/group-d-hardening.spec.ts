@@ -146,14 +146,20 @@ test('stale oracle shows market-data-status warning on /trade', async ({ page })
   const auth = readAuth();
   const admin = adminClient();
   await resetE2EOracleState(admin);
-  const staleAt = new Date(Date.now() - 120_000).toISOString();
-  await admin.from('oracle_prices').update({ updated_at: staleAt }).eq('symbol', 'PHONUSDT-PERP');
+  const staleAt = new Date(Date.now() - 600_000).toISOString();
+  await admin
+    .from('oracle_prices')
+    .update({ updated_at: staleAt })
+    .in('symbol', ['PHONUSDT-PERP', 'PHON_USDT']);
 
   await injectSession(page, auth.accessToken, auth.refreshToken);
   await page.goto('/trade');
-  await expect(page.getByTestId('futures-open')).toBeEnabled({ timeout: 20_000 });
+  await expect(page.getByTestId('futures-open')).toBeDisabled({ timeout: 20_000 });
   await expect(page.getByTestId('market-data-status')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('market-data-status')).toContainText(/delayed|지연/i);
+  await expect.poll(
+    async () => await page.getByTestId('market-data-status').textContent(),
+    { timeout: 20_000 },
+  ).toMatch(/delayed|지연|syncing|동기화/i);
 });
 
 test('parallel futures opens respect OI cap (race boundary)', async ({ page }) => {

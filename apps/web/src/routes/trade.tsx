@@ -32,6 +32,7 @@ import { toDecimal } from '@phonara/money';
 import { isPositiveAmount, isNegativeAmount } from '../lib/money-display';
 import { normalizeDecimalInput } from '../lib/money-input';
 import { useT } from '../lib/i18n';
+import { useRealtimeConnectionStore } from '../stores/realtime';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -46,6 +47,7 @@ function TradePage() {
   const { session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { wallet, loading: walletLoading } = useWallet();
+  const realtimeDisconnected = useRealtimeConnectionStore((s) => s.disconnected);
   const {
     prices,
     isError: pricesError,
@@ -138,6 +140,7 @@ function TradePage() {
             usdtAvail={wallet?.usdt_available ?? '0'}
             walletLoading={walletLoading}
             isPriceStale={isPriceStale}
+            realtimeDisconnected={realtimeDisconnected}
             onTraded={refresh}
           />
           <SpotPanel
@@ -146,10 +149,17 @@ function TradePage() {
             usdtAvail={wallet?.usdt_available ?? '0'}
             phonAvail={wallet?.phon_available ?? '0'}
             priceStale={selectedSpotMarket ? isPriceStale(selectedSpotMarket.symbol) : false}
+            realtimeDisconnected={realtimeDisconnected}
           />
         </section>
 
-        <OpenPositions positions={positions} prices={prices} isPriceStale={isPriceStale} onClosed={refresh} />
+        <OpenPositions
+          positions={positions}
+          prices={prices}
+          isPriceStale={isPriceStale}
+          realtimeDisconnected={realtimeDisconnected}
+          onClosed={refresh}
+        />
       </div>
     </div>
   );
@@ -396,6 +406,7 @@ function TradeNotificationCenter({
 
 function FuturesPanel({
   markets, marketsLoading, prices, phonAvail, usdtAvail, walletLoading, isPriceStale, onTraded,
+  realtimeDisconnected,
 }: {
   markets: FuturesMarket[];
   marketsLoading: boolean;
@@ -405,6 +416,7 @@ function FuturesPanel({
   walletLoading: boolean;
   isPriceStale: (symbol: string | null | undefined) => boolean;
   onTraded: () => void;
+  realtimeDisconnected: boolean;
 }) {
   const t = useT();
   const [marketIdx, setMarketIdx] = useState(0);
@@ -438,6 +450,8 @@ function FuturesPanel({
   const { candles, loading: candlesLoading, isError: candlesError, refetch: refetchCandles } = useCandles(market?.symbol ?? null, '1m');
   const syntheticBook = useSyntheticBook(market?.symbol ?? null);
   const staleReason = t('trade.dataStatus.staleDescription');
+  const realtimeReason = t('trade.dataStatus.realtimeDisconnectedDescription');
+  const disabledReason = priceStale ? staleReason : realtimeDisconnected ? realtimeReason : undefined;
 
   useEffect(() => {
     if (marketIdx >= markets.length) setMarketIdx(0);
@@ -454,7 +468,7 @@ function FuturesPanel({
   }, [leverage, maxLeverage]);
 
   async function submitOpen() {
-    if (!market || priceStale) return;
+    if (!market || priceStale || realtimeDisconnected) return;
     await openPosition({ market: market.symbol, side, marginCurrency, marginAmount: margin, leverage });
     setConfirmOpen(false);
   }
@@ -641,12 +655,12 @@ function FuturesPanel({
       {error && <p className="card-error">{t(error)}</p>}
       {riskAck.error && <p className="card-error">{t(riskAck.error)}</p>}
 
-      <span className="block" title={priceStale ? staleReason : undefined}>
+      <span className="block" title={disabledReason}>
         <Button
           variant={side === 'long' ? 'success' : 'danger'}
           full
           data-testid="futures-open"
-          disabled={busy || walletLoading || !preview || priceStale || (isHighLeverage && !riskAck.acknowledged)}
+          disabled={busy || walletLoading || !preview || priceStale || realtimeDisconnected || (isHighLeverage && !riskAck.acknowledged)}
           onClick={() => setConfirmOpen(true)}
         >
           {busy ? t('common.processing') : t(side === 'long' ? 'trade.openLongPosition' : 'trade.openShortPosition')}
@@ -682,13 +696,14 @@ function FuturesPanel({
 // ─── Spot panel ────────────────────────────────────────────────
 
 function SpotPanel({
-  market, price, usdtAvail, phonAvail, priceStale,
+  market, price, usdtAvail, phonAvail, priceStale, realtimeDisconnected,
 }: {
   market: SpotMarket | null;
   price: string;
   usdtAvail: string;
   phonAvail: string;
   priceStale: boolean;
+  realtimeDisconnected: boolean;
 }) {
   const t = useT();
   const [tab, setTab] = useState<'buy' | 'sell'>('buy');
@@ -697,6 +712,8 @@ function SpotPanel({
   const { buy, sell, busy, error } = useSpotActions();
   const [msg, setMsg] = useState<string | null>(null);
   const staleReason = t('trade.dataStatus.staleDescription');
+  const realtimeReason = t('trade.dataStatus.realtimeDisconnectedDescription');
+  const disabledReason = priceStale ? staleReason : realtimeDisconnected ? realtimeReason : undefined;
 
   // Estimate via the canonical Decimal spot engine (matches the SQL settlement
   // exactly: same 0.1% fee + 6dp truncation), never JS float arithmetic.
@@ -712,7 +729,7 @@ function SpotPanel({
   }, [amount, tab, price]);
 
   async function submit() {
-    if (priceStale) return;
+    if (priceStale || realtimeDisconnected) return;
     setMsg(null);
     const r = tab === 'buy' ? await buy(amount) : await sell(amount);
     setConfirmOpen(false);
@@ -764,12 +781,12 @@ function SpotPanel({
       {error && <p className="card-error">{t(error)}</p>}
       {msg && <p className="trade-success">{msg}</p>}
 
-      <span className="block" title={priceStale ? staleReason : undefined}>
+      <span className="block" title={disabledReason}>
         <Button
           variant={tab === 'buy' ? 'success' : 'danger'}
           full
           data-testid="spot-submit"
-          disabled={busy || !estimate || priceStale}
+          disabled={busy || !estimate || priceStale || realtimeDisconnected}
           onClick={() => setConfirmOpen(true)}
         >
           {busy ? t('common.processing') : tab === 'buy' ? t('trade.buyPhon') : t('trade.sellPhonBtn')}
@@ -806,11 +823,12 @@ function SpotPanel({
 // ─── Open positions ────────────────────────────────────────────
 
 function OpenPositions({
-  positions, prices, isPriceStale, onClosed,
+  positions, prices, isPriceStale, realtimeDisconnected, onClosed,
 }: {
   positions: FuturesPosition[];
   prices: Record<string, string>;
   isPriceStale: (symbol: string | null | undefined) => boolean;
+  realtimeDisconnected: boolean;
   onClosed: () => void;
 }) {
   const t = useT();
@@ -819,6 +837,7 @@ function OpenPositions({
   const open = positions.filter(p => p.status === 'open');
   const history = positions.filter(p => p.status !== 'open').slice(0, 10);
   const staleReason = t('trade.dataStatus.staleDescription');
+  const realtimeReason = t('trade.dataStatus.realtimeDisconnectedDescription');
 
   const closingCcy = (closing?.margin_currency ?? 'USDT') as 'PHON' | 'USDT';
   const closingMark = closing ? (prices[closing.market] ?? closing.entry_price) : '0';
@@ -827,7 +846,7 @@ function OpenPositions({
     : '0';
 
   async function submitClose() {
-    if (!closing || isPriceStale(closing.market)) return;
+    if (!closing || isPriceStale(closing.market) || realtimeDisconnected) return;
     await closePosition(closing.id);
     setClosing(null);
   }
@@ -844,6 +863,7 @@ function OpenPositions({
         const uPnl = computePnl(pos.side, pos.quantity, pos.entry_price, mark, marginCcy);
         const pnlNegative = isNegativeAmount(uPnl);
         const positionPriceStale = isPriceStale(pos.market);
+        const disabledReason = positionPriceStale ? staleReason : realtimeDisconnected ? realtimeReason : undefined;
         return (
           <Card key={pos.id} className="mb-3 flex flex-col gap-2.5 p-4">
             <div className="flex items-center gap-2">
@@ -859,12 +879,12 @@ function OpenPositions({
             <div className={`text-[0.95rem] font-bold ${pnlNegative ? 'text-down' : 'text-up'}`}>
               {t('trade.unrealizedPnl')}: {formatMoney(uPnl, marginCcy, { signed: true })} {pos.margin_currency}
             </div>
-            <span className="block" title={positionPriceStale ? staleReason : undefined}>
+            <span className="block" title={disabledReason}>
               <Button
                 variant="secondary"
                 size="sm"
                 data-testid="futures-close"
-                disabled={busy || positionPriceStale}
+                disabled={busy || positionPriceStale || realtimeDisconnected}
                 onClick={() => setClosing(pos)}
               >
                 {t('trade.closePositionBtn')}

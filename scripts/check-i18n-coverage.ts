@@ -1,8 +1,12 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const roots = ['apps', 'packages'];
 const koreanPattern = /[ㄱ-ㅎㅏ-ㅣ가-힣]/;
+const serverTestErrorCodePattern = [
+  /\bIF\s+v_msg\s*=\s*'([a-z_]+)'/g,
+  /\bmust\s+(?:raise|fail with)\s+([a-z_]+)/gi,
+];
 
 // The i18n catalog is the single source of Korean copy. Static HTML fallbacks
 // that ship outside the JS bundle cannot import the catalog, so they are
@@ -51,4 +55,40 @@ const bilingualViolations = bilingualHtmlFiles.flatMap(({ file, mustContain }) =
 
 if (bilingualViolations.length > 0) {
   throw new Error(`Bilingual fallback coverage failed:\n${bilingualViolations.join('\n')}`);
+}
+
+function extractMatches(content: string, patterns: RegExp[]): Set<string> {
+  const values = new Set<string>();
+  for (const pattern of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      const value = match[1]?.toLowerCase();
+      if (value) values.add(value);
+    }
+  }
+  return values;
+}
+
+const translateErrorFiles = [
+  'apps/web/src/lib/translate-error.ts',
+  'apps/admin/src/lib/translate-error.ts',
+].filter((file) => existsSync(file));
+const translateErrorContent = translateErrorFiles
+  .map((file) => readFileSync(file, 'utf8'))
+  .join('\n');
+const mappedErrorCodes = extractMatches(translateErrorContent, [/\[\s*'([a-z_]+)'\s*,\s*'error\.[A-Z_]+'\s*\]/g]);
+const serverTestErrorCodes = extractMatches(
+  collectFiles('supabase/tests')
+    .filter((file) => file.endsWith('.sql'))
+    .map((file) => readFileSync(file, 'utf8'))
+    .join('\n'),
+  serverTestErrorCodePattern,
+);
+const missingServerErrorMappings = [...serverTestErrorCodes]
+  .filter((code) => !mappedErrorCodes.has(code))
+  .sort();
+
+if (missingServerErrorMappings.length > 0) {
+  throw new Error(
+    `Server-tested error codes missing translate-error mappings:\n${missingServerErrorMappings.join('\n')}`,
+  );
 }

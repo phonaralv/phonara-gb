@@ -1,4 +1,4 @@
-import { createRoute } from '@tanstack/react-router';
+import { createRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root';
 import { AdminLayout } from '../components/admin-layout';
@@ -25,6 +25,12 @@ function OverviewPage() {
     staleTime: 60_000,
     refetchInterval: 60_000,
   });
+  const { data: alertData } = useQuery({
+    queryKey: ['ops-alerts'],
+    queryFn: fetchOpsAlertsSummary,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
 
   const checks = data?.checks ?? [];
   const systemMode = findCheck(checks, 'system_mode');
@@ -37,9 +43,13 @@ function OverviewPage() {
   const pendingExceptions = findCheck(checks, 'pending_exceptions');
   const treasurySolvency = findCheck(checks, 'treasury_solvency');
 
+  const unresolvedAlerts =
+    alertData?.alerts.filter((a) => a.status === 'open' || a.status === 'acknowledged').length ?? 0;
+
   function refreshAll() {
     void refetch();
     void qc.invalidateQueries({ queryKey: ['app-config'] });
+    void qc.invalidateQueries({ queryKey: ['ops-alerts'] });
   }
 
   return (
@@ -100,6 +110,22 @@ function OverviewPage() {
               </div>
             </Card>
           </div>
+        )}
+
+        {!isLoading && !error && unresolvedAlerts > 0 && (
+          <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between" data-testid="ops-alerts-cta">
+            <div>
+              <p className="text-sm font-semibold text-fg">{t('admin.overview.alertsBanner.title')}</p>
+              <p className="mt-1 text-sm text-muted">
+                {t('admin.overview.alertsBanner.description', { count: unresolvedAlerts })}
+              </p>
+            </div>
+            <Link to="/alerts" data-testid="ops-alerts-cta-link">
+              <Button variant="primary" size="sm">
+                {t('admin.overview.alertsBanner.cta')}
+              </Button>
+            </Link>
+          </Card>
         )}
 
         {!isLoading && !error && (
@@ -214,6 +240,32 @@ async function fetchOpsHealth(): Promise<OpsHealthResponse> {
   const { data, error } = await supabase.rpc('rpc_get_ops_health');
   if (error) throw error;
   return parseOpsHealth(data);
+}
+
+interface OpsAlertSummary {
+  id: string;
+  status: 'open' | 'acknowledged' | 'resolved';
+}
+
+async function fetchOpsAlertsSummary(): Promise<{ alerts: OpsAlertSummary[] }> {
+  const { data, error } = await supabase.rpc('rpc_get_ops_alerts', {
+    p_statuses: ['open', 'acknowledged'],
+  });
+  if (error) throw error;
+  if (!isRecord(data)) return { alerts: [] };
+  const rawAlerts = Array.isArray(data['alerts']) ? data['alerts'] : [];
+  const alerts = rawAlerts
+    .map((row) => {
+      if (!isRecord(row)) return null;
+      const id = typeof row['id'] === 'string' ? row['id'] : null;
+      const status = row['status'];
+      if (!id || (status !== 'open' && status !== 'acknowledged' && status !== 'resolved')) {
+        return null;
+      }
+      return { id, status };
+    })
+    .filter((row): row is OpsAlertSummary => row !== null);
+  return { alerts };
 }
 
 function parseOpsHealth(value: Json): OpsHealthResponse {

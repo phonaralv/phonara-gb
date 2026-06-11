@@ -954,6 +954,87 @@ export type Database = {
         }
         Relationships: []
       }
+      ops_alerts: {
+        Row: {
+          ack_reason: string | null
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          created_at: string
+          dedupe_key: string
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          metadata: Json
+          occurrence_count: number
+          resolve_reason: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          runbook_key: string
+          severity: string
+          source_check_id: string
+          status: string
+          summary: string
+          updated_at: string
+        }
+        Insert: {
+          ack_reason?: string | null
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          created_at?: string
+          dedupe_key: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          metadata?: Json
+          occurrence_count?: number
+          resolve_reason?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          runbook_key: string
+          severity: string
+          source_check_id: string
+          status?: string
+          summary: string
+          updated_at?: string
+        }
+        Update: {
+          ack_reason?: string | null
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          created_at?: string
+          dedupe_key?: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          metadata?: Json
+          occurrence_count?: number
+          resolve_reason?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          runbook_key?: string
+          severity?: string
+          source_check_id?: string
+          status?: string
+          summary?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ops_alerts_acknowledged_by_fkey"
+            columns: ["acknowledged_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_alerts_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       position_ledger: {
         Row: {
           created_at: string
@@ -2725,6 +2806,19 @@ export type Database = {
         Returns: Json
       }
       rpc_get_ops_health: { Args: never; Returns: Json }
+      rpc_get_ops_alerts: {
+        Args: { p_resolved_days?: number; p_statuses?: string[] | null }
+        Returns: Json
+      }
+      rpc_ack_ops_alert: {
+        Args: { p_alert_id: string; p_reason: string }
+        Returns: Json
+      }
+      rpc_resolve_ops_alert: {
+        Args: { p_alert_id: string; p_reason: string }
+        Returns: Json
+      }
+      rpc_sync_ops_alerts_from_health: { Args: never; Returns: Json }
       rpc_get_synthetic_book: {
         Args: { p_levels?: number; p_symbol: string }
         Returns: Json

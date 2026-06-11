@@ -14,6 +14,7 @@ import { estimateStakingReward } from '@phonara/trading-engine';
 import { formatMoney, ConfirmDialog, Button, Card, Stat, Badge, Input, EmptyState, Skeleton } from '@phonara/ui';
 import type { MessageKey } from '@phonara/i18n';
 import { isPositiveAmount, ratePercent } from '../lib/money-display';
+import { normalizeDecimalInput } from '../lib/money-input';
 import { useI18n, useT } from '../lib/i18n';
 
 export const Route = createRoute({
@@ -117,7 +118,12 @@ function StakeCard({ pool, phonAvail, onStaked }: { pool: StakingPool; phonAvail
         <span className="text-base font-extrabold text-up">{aprPct}% APR</span>
       </div>
       <div className="field-row">
-        <Input inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} className="flex-1 min-w-0 text-right" />
+        <Input
+          inputMode="decimal"
+          value={amount}
+          onChange={e => setAmount(normalizeDecimalInput(e.target.value))}
+          className="flex-1 min-w-0 text-right"
+        />
         <span className="input-suffix">PHON</span>
       </div>
       <div className="field-hint">{t('staking.holding')}: {formatMoney(phonAvail, 'PHON')}</div>

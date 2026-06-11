@@ -536,14 +536,23 @@ isProject: false
 
 초기 현물은 복잡한 다중 오더북보다 **PHON/USDT 자체 마켓**부터 시작합니다.
 
+#### PHON/USDT 운영 모델 확정 (2026-06-12)
+
+- 확정 모델: **고정 오라클가 + 수수료 모델**.
+- 결정 사유: 운영 단순성, 경제 통제, 감사 완료 코드 유지.
+- PHON/USDT 가격은 관리가격으로 운영하며, `PHON_USDT`와 `PHONUSDT-PERP`는 전역 `oracle_min_sources=1` 폴백을 유지한다.
+- 외부 가격 심볼(`BTCUSDT-SIM`, `ETHUSDT-SIM`)은 per-symbol `oracle_min_sources:<symbol>=2`로 최소 2개 유효 소스를 요구한다.
+- PHON/USDT bonding curve/AMM 구현 계획은 **폐기(superseded)** 한다. 결정 이력 보존을 위해 항목은 남기되 신규 AMM 구현은 금지한다.
+
 #### Spot MVP
 
 - 마켓: `PHON/USDT`
 - 주문 방식:
   - 시장가 매수/매도
-  - 지정가 매수/매도는 Phase 2 확장
+  - 지정가 매수/매도는 Phase 2 확장 후보였으나, PHON/USDT는 고정 오라클가 + 수수료 모델 확정에 따라 보류
 - 가격:
-  - Admin 기준가 + 내부 유동성 풀
+  - Admin 기준가 + 수수료
+  - 내부 유동성 풀 / bonding curve / AMM: **폐기(superseded)** — 구현 금지
   - 모든 체결에 가격 스냅샷 저장
 - 정산:
   - 매수: USDT 차감 → PHON 증가
@@ -554,11 +563,11 @@ isProject: false
 - [ ] `spot_markets` 스키마
 - [ ] `spot_orders` 스키마
 - [ ] `spot_trades` 스키마
-- [ ] `liquidity_pools` 스키마
+- [ ] `liquidity_pools` 스키마 — **폐기(superseded)**: PHON/USDT는 고정 오라클가 + 수수료 모델로 확정
 - [ ] `place_spot_market_buy_atomic` RPC
 - [ ] `place_spot_market_sell_atomic` RPC
-- [ ] `place_spot_limit_order_atomic` RPC (확장)
-- [ ] `cancel_spot_order_atomic` RPC (확장)
+- [ ] `place_spot_limit_order_atomic` RPC (확장 후보, PHON/USDT 고정가 모델에서는 보류)
+- [ ] `cancel_spot_order_atomic` RPC (확장 후보, PHON/USDT 고정가 모델에서는 보류)
 - [ ] PHON/USDT 차트
 - [ ] 호가/최근 체결 UI
 - [ ] E2E: USDT로 PHON 매수 → 원장 검증
@@ -2341,6 +2350,97 @@ phonara-gb/
 > 규칙(`70-autonomy-and-delivery`)에 따라 각 작업 완료 직후 여기에 누적 기록한다.
 > 형식: 날짜 · 무엇을/어떻게 · 발생 오류와 근본원인→수정 · 실행 테스트/결과.
 > 새 세션은 이 로그만 읽고 이어서 작업할 수 있어야 한다.
+
+## 2026-06-12 — Withdrawal High Audit Fix
+
+### Self-approval block + withdrawal kill switch + KRW deposit match lock
+- **무엇을**: 감사에서 High로 분류된 출금 자기승인 가능성과 approve/sent 단계의 withdrawal
+  kill switch 누락을 닫고, 확인된 KRW 입금 매칭 pending-row race에 row lock을 추가.
+- **어떻게**:
+  - [`supabase/migrations/20260611000063_withdrawal_admin_guard_and_deposit_lock.sql`](../supabase/migrations/20260611000063_withdrawal_admin_guard_and_deposit_lock.sql):
+    `rpc_approve_withdrawal(UUID,TEXT)`, `rpc_mark_withdrawal_sent(UUID,TEXT)`에
+    `_assert_feature_enabled('withdrawal')`를 request row lock 전 시작부에 삽입.
+    같은 두 RPC에 `v_req.user_id = v_actor`이면 `self_approval_forbidden`을 던지는 가드를
+    idempotent return보다 앞에 추가. `rpc_reject_withdrawal`은 환원 경로라 변경하지 않음.
+    `_try_match_krw_deposit(TEXT,TEXT,TEXT,TEXT)`는 pending `krw_deposit_requests` 선택에
+    `FOR UPDATE`를 추가. 잠금 순서는 deposit request row → credit helper의 deposit row → wallet row로 유지.
+  - [`supabase/tests/phase5_withdrawal_test.sql`](../supabase/tests/phase5_withdrawal_test.sql):
+    자기승인 차단, approve/sent feature-off 차단, approve idempotency/order 회귀 검증 추가.
+  - [`supabase/tests/phase5_deposit_test.sql`](../supabase/tests/phase5_deposit_test.sql):
+    `_try_match_krw_deposit` pending select가 `FOR UPDATE`를 포함하는지 구조 검증 추가.
+  - [`supabase/tests/ops_health_test.sql`](../supabase/tests/ops_health_test.sql):
+    전체 SQL suite 중 `cron.job_run_details.runid` 단일 PK와 충돌하던 fixture runid 산정을
+    `jobid` 범위가 아니라 전체 테이블 `MAX(runid)+1`로 수정.
+- **오류/수정**:
+  - `000063` 초안에서 `_try_match_krw_deposit` 동적 치환 앵커가 `pg_get_functiondef` 포맷과 불일치
+    → 함수 전체 재정의로 바꾸고 변경점은 `LIMIT 1 FOR UPDATE`로 제한.
+  - approve/sent feature guard 삽입 앵커가 공백 포맷 때문에 빠짐
+    → `SELECT ... FOR UPDATE` 직전 삽입으로 바꾸고 누락 시 migration fail-fast 검증 추가.
+  - 전체 SQL suite 첫 실행에서 `ops_health_test.sql` fixture가 다른 cron job의 `runid`와 충돌
+    → PK 기준 runid 계산으로 수정.
+- **검증**:
+  - RED 확인: `phase5_withdrawal_test.sql` 자기승인 approve가 기존 스키마에서 성공해 실패,
+    `phase5_deposit_test.sql`가 기존 `_try_match_krw_deposit`에 `FOR UPDATE` 부재로 실패.
+  - `supabase db reset` green — migration `000063` 적용.
+  - Focused SQL green: `phase5_withdrawal_test.sql`, `phase5_deposit_test.sql`, `ops_health_test.sql`.
+  - `bun run test:sql` green — 31/31 SQL files passed.
+- **idempotency 변화**: `feature_withdrawal_enabled=true`인 이미 approved 요청의 approve 재호출은
+  기존처럼 idempotent return 유지. flag가 `false`이면 새 시작부 kill switch가 idempotent return보다
+  먼저 실행되어 `feature_disabled`가 된다.
+- **원격 변경**: 없음.
+
+### KRW deposit pending double-defense follow-up
+- **무엇을**: 재감사 잔여 항목인 동일 pending 입금요청 이중 매칭 방어를 마감.
+- **어떻게**:
+  - [`supabase/migrations/20260611000063_withdrawal_admin_guard_and_deposit_lock.sql`](../supabase/migrations/20260611000063_withdrawal_admin_guard_and_deposit_lock.sql):
+    `_try_match_krw_deposit`의 `krw_deposit_requests` 상태 전환 UPDATE에
+    `AND status = 'pending'`을 추가하고, 영향 행이 없으면 `deposit_request_not_pending`으로 중단.
+    `000063`은 git 기준 신규 로컬 migration이고 위 항목의 Build Log도 원격 변경 없음으로 기록되어
+    별도 후속 migration 대신 같은 로컬 reset 대상 파일을 보정.
+  - [`supabase/tests/phase5_deposit_test.sql`](../supabase/tests/phase5_deposit_test.sql):
+    같은 reference의 pending 요청에 서로 다른 transfer_id 2건을 순차 처리해 첫 번째만 credited,
+    두 번째는 `reference_not_found`임을 검증. `first_deposit` 미션 보상은 사전 완료 fixture로
+    격리하고, 첫 delta가 `expected_phon` 변수와 정확히 일치하며 두 번째 추가 delta가 0임을 단언.
+- **RED-first 결과**: 새 순차 매칭 회귀는 기존 `FOR UPDATE` + 첫 처리의 `credited` 상태 전환 때문에
+  보정 전에도 green. 두 번째 transfer가 pending row를 찾지 못해 매칭 실패하므로 RED가 나지 않는 것이 정상.
+- **검증**: `supabase db reset` green, `bun run test:sql` green — 31/31 SQL files passed.
+  후속 단언 강화 후 `phase5_deposit_test.sql` 단일 파일 재실행 green.
+- **원격 변경**: 없음.
+
+## 2026-06-12 — Ops Alert Queue + Ack
+
+### 영속 운영 알림 inbox + Admin ack/resolve
+- **무엇을**: Observability 1단계(`rpc_get_ops_health`) 위에 warning/critical 신호를 영속
+  `ops_alerts` inbox로 materialize하고, 운영자 ack/resolve lifecycle과 감사 로그를 추가.
+  `admin_review_queue`(업무 예외)와 분리.
+- **어떻게**:
+  - [`supabase/migrations/20260611000061_ops_alert_queue.sql`](../supabase/migrations/20260611000061_ops_alert_queue.sql):
+    `ops_alerts` 테이블 + admin SELECT-only RLS + active `dedupe_key` partial unique index.
+    기존 `rpc_get_ops_health()` body를 `_ops_build_health_snapshot()`으로 추출(무회귀 wrapper 유지).
+    `_sync_ops_alerts_from_health()`는 transaction + `FOR UPDATE`로 upsert/dedupe/auto-resolve.
+    client RPC: `rpc_get_ops_alerts`, `rpc_sync_ops_alerts_from_health`, `rpc_ack_ops_alert`,
+    `rpc_resolve_ops_alert`. audit action: `ops_alert_acknowledged`, `ops_alert_resolved`,
+    `ops_alert_auto_resolved`.
+  - [`supabase/tests/ops_alerts_test.sql`](../supabase/tests/ops_alerts_test.sql): snapshot 무회귀,
+    sync dedupe/occurrence_count, ack reason/idempotency/audit, auto-resolve, manual resolve.
+  - [`apps/admin/src/routes/alerts.tsx`](../apps/admin/src/routes/alerts.tsx): Alerts route —
+    60초 polling, sync, ack/resolve via `AdminActionDialog`, `DataTable`/`Badge` 재사용.
+  - [`apps/admin/src/routes/overview.tsx`](../apps/admin/src/routes/overview.tsx): unresolved alert
+    count CTA → `/alerts`.
+  - [`packages/i18n/src/index.ts`](../packages/i18n/src/index.ts): `admin.nav.alerts`,
+    `admin.alerts.*`, `admin.overview.alertsBanner.*` ko/en.
+  - [`packages/shared-types/src/database.types.ts`](../packages/shared-types/src/database.types.ts):
+    `ops_alerts` + alert RPC 타입.
+  - [`tests/e2e/admin.spec.ts`](../tests/e2e/admin.spec.ts): sync→ack→audit positive, non-admin RPC
+    negative, RBAC route에 `/alerts` 추가.
+- **오류/수정**: SQL 테스트 초안에서 `v_success_at` 미선언 → DECLARE 추가.
+- **검증**:
+  - `supabase db reset` green — migration `000061` 적용.
+  - `bun run test:sql` green — 30/30 passed (`ops_health_test.sql` + `ops_alerts_test.sql`).
+  - `bun run build:packages`, `bun run typecheck`, `bun run check:i18n`, `bun run check:release` green.
+  - Admin E2E(`ops alert`)는 로컬 `SUPABASE_SERVICE_ROLE_KEY` 미설정으로 실행 차단; SQL authz/lifecycle
+    게이트로 대체 검증 완료.
+- **원격 변경**: 없음. v1.1 후속: pg_cron/Edge 자동 sync, resolved archive retention.
 
 ## 2026-06-11 — Observability 1단계 내부 운영 상태판
 
@@ -4167,6 +4267,61 @@ phonara-gb/
   - [`RUNBOOK.md`](RUNBOOK.md) Scenario 1 — 5 `check_type` values + observability queries.
   - [`SUPABASE_ACCESS_MATRIX.md`](SUPABASE_ACCESS_MATRIX.md) — table×role×GRANT×RLS reference.
 - **게이트**: `supabase db reset` clean(000001~000057); `bun run test:sql` **28/28** green; `bun run check:release` green. 리모트 apply 0.
+
+### 2026-06-12 Trading mechanical hardening — min_notional, parity boundaries, oracle single-source alert (local)
+
+- **범위 제한**: 사용자 지정대로 TWAP, AMM, house exposure cap 설계 변경은 하지 않았다. 기존 metadata/RPC/alert surface에 기계적 guard와 회귀 테스트만 추가.
+- **READ-ONLY 재확인**: `futures_markets.min_notional` / `spot_markets.min_notional`은 `20260609000038_stage2_market_metadata.sql`에서 컬럼·format constraint·기본값만 존재했고, `rpc_open_futures_position` / `rpc_spot_market_buy` / `rpc_spot_market_sell` 본문과 테스트에는 `below_min_notional` 집행이 없음을 확인.
+- **RED→GREEN**: [`hardening_test.sql`](../supabase/tests/hardening_test.sql)에 futures/spot below-min-notional rejection + exact boundary allow 테스트를 먼저 추가하자 현행 DB에서 `below_min_notional` 미발생으로 RED. 이후 [`20260611000064_trading_min_notional_and_oracle_alert.sql`](../supabase/migrations/20260611000064_trading_min_notional_and_oracle_alert.sql)로 8-arg futures open 및 2-arg spot entry RPC에 `notional >= market.min_notional` guard를 주입해 GREEN.
+- **Parity 경계 보강**: [`packages/trading-engine/src/sql-parity.test.ts`](../packages/trading-engine/src/sql-parity.test.ts)와 [`futures_parity_test.sql`](../supabase/tests/futures_parity_test.sql)에 시장별 max leverage exact-boundary 청산가 공식 parity, just-over-max rejection, mark=liq/±1 tick liquidation boundary를 추가. 절대값 고정 대신 테스트 내 공식 계산 또는 RPC-returned liquidation price 기반으로 단언.
+- **Oracle alert**: `rpc_submit_oracle_source_price`가 median 계산 후 유효 소스 수 1개를 감지하면 `_record_oracle_single_source_alert`로 `ops_alerts`에 `oracle_single_source:<symbol>` warning을 1회 생성한다. 동일 active alert가 있으면 스킵해 중복을 방지하며, 거래 차단은 하지 않는다. [`ops_alerts_test.sql`](../supabase/tests/ops_alerts_test.sql)에 single-source 생성/중복 방지 검증 추가.
+- **게이트**: RED 캡처 `bun run test:sql` 실패(`futures open below min_notional must raise below_min_notional, got <none>`). 수정 후 `supabase db reset` green(000001~000064), `bun run test:sql` **31/31** green, `bun run test` **142 passed / 1 skipped**, `bun run typecheck` green, `bun run lint` green, `bun run check:release` green, 편집 파일 린트 0. 리모트 apply 0.
+
+### 2026-06-12 Oracle operating model lock — per-symbol min_sources + PHON managed price (local)
+
+- **결정 반영**: PHON/USDT bonding curve/AMM 계획은 폐기(superseded)로 표기하고, PHON/USDT는 **고정 오라클가 + 수수료 모델**로 확정했다. 결정일은 2026-06-12, 사유는 운영 단순성, 경제 통제, 감사 완료 코드 유지. AMM 항목은 삭제하지 않고 `liquidity_pools`/내부 유동성 풀/limit order 확장 후보에 superseded 표시를 남겼다.
+- **READ-ONLY 확인**: PHON 가격 경로는 별도 관리가격 RPC가 아니라 `oracle_prices`의 `PHON_USDT`/`PHONUSDT-PERP`를 `rpc_update_oracle_price` 또는 median feed 경로가 갱신하는 구조다. `rpc_update_oracle_price`는 `price_change_audit`에 기록하며 `audit_logs`에는 직접 쓰지 않는다. `market_circuit_breakers`에는 `PHON_USDT`와 `PHONUSDT-PERP`가 모두 있어 `max_tick_pct`가 적용된다. `app_config`는 RLS `app_config: admin rw`와 client SELECT-only GRANT 상태라 새 키 추가로 쓰기 권한 확장은 없다.
+- **구현**: [`20260611000065_oracle_per_symbol_min_sources.sql`](../supabase/migrations/20260611000065_oracle_per_symbol_min_sources.sql)에서 `_compute_oracle_median(text)`만 재정의했다. 조회 순서는 `oracle_min_sources:<symbol>` → 전역 `oracle_min_sources` → 기본 1이며, 새 테이블/RPC는 만들지 않았다. 실제 market 심볼 기준으로 `oracle_min_sources:BTCUSDT-SIM=2`, `oracle_min_sources:ETHUSDT-SIM=2`를 seed했고, PHON 관련 키는 만들지 않아 전역 1 폴백을 유지했다.
+- **RED→GREEN**: [`ops_alerts_test.sql`](../supabase/tests/ops_alerts_test.sql)에 세 케이스를 추가했다. RED는 현행 함수가 `oracle_min_sources:BTCUSDT-SIM=2`를 무시해 단일 소스 `BTCUSDT-SIM` median 갱신이 통과한 실패(`BTCUSDT-SIM single source must be rejected...`)였다. GREEN은 `BTCUSDT-SIM` 단일 소스가 `insufficient_sources`로 거부되고 가격이 유지됨, `PHON_USDT` 단일 소스는 전역 1 폴백으로 갱신됨, 키 없는 `OPS_GLOBAL_FALLBACK`도 전역 1 폴백으로 갱신됨을 확인했다.
+- **게이트**: `supabase db reset` green(000001~000065), `bun run test:sql` **31/31** green, `bun run check:release` green, `supabase db lint --local --level error` 0 issue, `ReadLints` 0. 리모트 apply 0.
+
+### 2026-06-12 Casino seed reveal idempotency + client seed lifecycle (local)
+
+- **중복 조회**: 로컬 DB에서 `SELECT round_id, count(*) FROM public.game_seed_reveals GROUP BY round_id HAVING count(*) > 1;` 실행 결과 0 rows. 기존 reveal 데이터 정리는 필요 없었다.
+- **RED→GREEN**: [`casino_schema_test.sql`](../supabase/tests/casino_schema_test.sql)에 동일 round `rpc_reveal_game_round` 2회 호출 시 seed 응답은 같고 `game_seed_reveals` row는 1개여야 한다는 테스트를 먼저 추가했다. RED는 현행 스키마에서 `repeat reveal must write one seed log row, got 2`. 이후 [`20260611000066_casino_seed_reveal_idempotency.sql`](../supabase/migrations/20260611000066_casino_seed_reveal_idempotency.sql)로 기존 중복 가드 + `game_seed_reveals_round_id_key UNIQUE(round_id)`를 추가하고, reveal insert를 `ON CONFLICT (round_id) DO NOTHING`으로 정합화해 GREEN.
+- **UI/설계**: [`apps/web/src/routes/casino.tsx`](../apps/web/src/routes/casino.tsx)에 `client_seed` 입력을 노출하고, 자동 생성값일 때만 새 round open마다 `crypto.getRandomValues` 기반 값으로 갱신되도록 했다. 사용자가 직접 입력하면 이후 round open에서도 값을 덮지 않는다. [`docs/ADR/0002-casino-settlement.md`](ADR/0002-casino-settlement.md)에 reveal kill switch 미적용 사유(정산 후 증거 공개 보장), one-shot round의 `nonce=1`, plaintext `server_seed` 보관 한계와 seed encryption 백로그를 명문화했다.
+- **오류→수정**: 첫 `supabase db reset`은 신규 migration version을 `20260611000065`로 만들어 기존 oracle migration과 충돌(`schema_migrations_pkey`)해 실패. 파일을 `20260611000066`으로 재번호화해 reset green. Casino E2E 첫 실행은 local service-role env 미설정, 두 번째는 E2E fixture가 wallet balance를 direct UPDATE하다 `ledger_write_not_allowed`로 실패. [`tests/e2e/_helpers.ts`](../tests/e2e/_helpers.ts)에 transaction-local `phonara.ledger_write` guard를 여는 `fundE2EWallet` helper를 추가하고 global setup/casino fixture funding을 그 경로로 바꿔 E2E green.
+- **게이트**: `supabase db reset` green(000001~000066), `bun run test:sql` **31/31** green, `SUPABASE_SERVICE_ROLE_KEY=<local secret> bun run test:e2e -- tests/e2e/casino.spec.ts tests/e2e/casino-wave7-closeout.spec.ts` **11/11** green, `ReadLints` 0, `bun run check:i18n` green, `bun run check:release` green, `bun run typecheck` green. 리모트 apply 0.
+
+### 2026-06-12 TS engine audit follow-up — CI casino parity + internal amount guards + wallet-ledger status (local)
+
+- **CI parity 활성화**: 기존 `.github/workflows/ci.yml` `sql` job은 이미 `supabase start`와 `supabase db reset`을 선행하므로, 같은 job에 `PHONARA_SQL_PARITY=1 bunx vitest run tests/integration/casino-sql-parity.test.ts` step을 추가했다. 별도 job은 만들지 않았다.
+- **amount=0 전수 검색**: 지정 helper `_debit_wallet_internal`, `_credit_wallet_internal`, `_lock_wallet_internal`, `_unlock_wallet_internal`, `_debit_locked_wallet_internal`, `_credit_system_account`, `_debit_system_account` 호출에서 리터럴 `0`/`0.000000` amount를 넘기는 정상 경로는 발견되지 않았다. 기존 fee/dust 경로는 `IF ... > 0 THEN` 조건 또는 `abs(...)`/`_fmt6(...)` 계산 경로로 호출된다.
+- **RED→GREEN**: `hardening_test.sql`에 `_debit_wallet_internal(..., '-1.000000', ...)` 직접 호출이 stable `invalid_amount`로 막히고 잔액이 변하지 않아야 한다는 테스트를 먼저 추가했다. migration 적용 전 로컬 DB에서 RED: `negative _debit_wallet_internal must raise invalid_amount, got new row for relation "wallet_ledger" violates check constraint "ledger_amount_positive"`. 이후 신규 `20260611000067_wallet_internal_amount_guards.sql`가 7개 내부 helper의 현재 `pg_get_functiondef` 본문에 `p_amount IS NULL OR p_amount !~ '^\d+(\.\d+)?$' OR p_amount::NUMERIC <= 0` guard를 주입해 helper 경계에서 `invalid_amount`로 차단한다.
+- **wallet-ledger 지위 명문화**: `packages/wallet-ledger/README.md`를 추가해 이 패키지는 SQL 원장 의미의 규범 TS 모델이며 런타임 settlement path에서 쓰이지 않음을 명시했다. 알려진 차이는 TS standalone `reverse` 미지원(SQL enum 존재)과 TS zero amount 거부이며, SQL 동작이 항상 우선한다.
+- **게이트**: migration 적용 전 `bun run test:sql` RED 캡처(위 helper test failure). 이후 `supabase db reset --debug` green(000001~000067), `bun run test:sql` **31/31** green, `PHONARA_SQL_PARITY=1 bunx vitest run tests/integration/casino-sql-parity.test.ts --reporter=verbose` green: `matches _game_result for 6 games across 1000 seeds each` passed. 리모트 apply 0.
+
+### 2026-06-12 Phase 2-A — client idempotency + stale price blocking + casino verifier retention (local)
+
+- **무엇을/어떻게**: 클라이언트 money-flow만 수정했다. [`apps/web/src/routes/wallet.tsx`](../apps/web/src/routes/wallet.tsx)는 KRW deposit `p_client_request_id`와 withdrawal `p_idempotency_key`/`p_client_request_id`를 ref로 보관하고 in-flight 재호출은 no-op 처리한다. Withdrawal key는 확인창을 여는 사용자 intent 시점에 생성하고 cancel 또는 확정 완료 후 폐기한다. [`apps/web/src/routes/casino.tsx`](../apps/web/src/routes/casino.tsx)는 bet idempotency key를 확인창 open 시점에 생성하고 in-flight double confirm을 no-op 처리한다.
+- **stale 차단**: [`apps/web/src/hooks/use-trading.ts`](../apps/web/src/hooks/use-trading.ts) `usePrices()`가 `market_circuit_breakers.staleness_seconds`를 함께 읽어 `_assert_price_fresh`와 같은 per-symbol 기준으로 stale을 계산한다. [`apps/web/src/routes/trade.tsx`](../apps/web/src/routes/trade.tsx)는 futures open/close와 spot buy/sell 버튼을 stale 상태에서 disabled 처리하고 기존 stale description copy를 `title` 사유로 제공한다. 하드코딩 30초 price gate는 제거했고, positions stale UI의 기존 fetch-age warning은 유지했다.
+- **casino verifier**: [`casino.tsx`](../apps/web/src/routes/casino.tsx)는 현재 next-round commitment와 마지막 검증 evidence를 분리했다. `verifyRound` 성공 후 자동 `prepareRound(..., preserveEvidence)`가 다음 hash를 준비해도 직전 `server_seed`/result/verification status는 사용자가 다음 베팅을 시작하거나 입력을 변경할 때까지 `FairnessVerifier`에 유지된다.
+- **E2E/게이트**: [`tests/e2e/phase5-wave9.spec.ts`](../tests/e2e/phase5-wave9.spec.ts)에 withdrawal double confirm → `rpc_request_withdrawal` 1회 단언을 추가했고, [`tests/e2e/casino-wave7-closeout.spec.ts`](../tests/e2e/casino-wave7-closeout.spec.ts)에 casino double confirm → `rpc_place_game_bet` 1회 + 검증 결과 유지 단언을 추가했다. 최초 targeted E2E는 local service-role env 미주입으로 setup fail; `supabase status -o env`에서 셸 변수로만 주입해 재실행했다. `bun run typecheck` green, `bun run lint` green, `bun run check:release` green, targeted Playwright 2/2 green(두 차례 확인). 서버/게임 공식/SQL/RPC 변경 없음, 리모트 apply 0.
+
+### 2026-06-12 Phase 2-B — display/error/input cleanup (local)
+
+- **표시/i18n**: [`translate-error.ts`](../apps/web/src/lib/translate-error.ts)에 `below_min_notional`, `self_approval_forbidden`, `phon_krw_rate_unavailable` 및 서버 테스트에 노출된 안정 코드 매핑을 추가하고, [`packages/i18n/src/index.ts`](../packages/i18n/src/index.ts)에 ko/en 사용자 문구를 추가했다. [`check-i18n-coverage.ts`](../scripts/check-i18n-coverage.ts)는 `supabase/tests/*.sql`이 명시적으로 기대하는 오류 코드와 중앙 `translate-error` 매핑을 대조해 신규 서버 테스트 오류 코드의 매핑 누락을 잡는다.
+- **금액 표시/입력**: [`welcome-modal.tsx`](../apps/web/src/components/welcome-modal.tsx)는 welcome PHON 보상을 KRW로 오표시하지 않고 PHON만 표시한다. [`wallet.tsx`](../apps/web/src/routes/wallet.tsx)는 활성 `PHON/KRW` 환율 기반 예상 PHON을 Decimal로 미리 보여주고, 환율 조회 실패/부재 시 처리 시점 환율 안내만 표시한다. 신규 [`money-input.ts`](../apps/web/src/lib/money-input.ts)로 지수 표기 차단과 7dp 초과 절사를 공통화하고 wallet/trade/staking/casino 입력에 적용했다. Casino stake의 `Number(stake)` 검증은 Decimal 문자열 검증으로 교체했다.
+- **Realtime/캐시**: [`use-trading.ts`](../apps/web/src/hooks/use-trading.ts)는 futures/spot/staking 액션 성공 후 `wallet` 쿼리를 무효화해 Realtime 지연에 의존하지 않게 했다. [`use-realtime.ts`](../apps/web/src/hooks/use-realtime.ts)는 `{ status, connected }`를 반환한다. 전역 헤더/배너 연결은 레이아웃 영향이 커 이번 범위에서 분리했다.
+- **게이트**: `bun run check:i18n` green(서버 테스트 오류코드↔translate-error 매핑 포함), `bun run typecheck` green, `bun run check:release` green, `bun run lint` green, `bun run test` green(142 passed / 1 skipped), 편집 파일 `ReadLints` 0. DB/RPC/마이그레이션 변경 및 리모트 apply 0.
+
+### 2026-06-12 Final audit follow-up — price_change_audit append-only + admin reason/error handling (local)
+
+- **전수 검색**: `price_change_audit`를 직접 `UPDATE`/`DELETE`하는 제품/테스트/migration 경로는 발견되지 않았다. 기존 항목은 `20260609000008_p0_hardening_schema.sql`의 RLS enable뿐이었다.
+- **RED→GREEN**: [`audit_logs_append_only_test.sql`](../supabase/tests/audit_logs_append_only_test.sql)에 `price_change_audit` UPDATE/DELETE가 `append_only_violation`을 raise해야 한다는 테스트를 먼저 추가했다. migration 전 RED는 `UPDATE on price_change_audit must raise append_only_violation`. 신규 [`20260611000068_price_change_audit_append_only.sql`](../supabase/migrations/20260611000068_price_change_audit_append_only.sql)이 `audit_logs`와 같은 `_ledger_deny_mutations()` BEFORE UPDATE/DELETE trigger를 설치해 GREEN.
+- **Admin UX/error**: [`AdminActionDialog`](../apps/admin/src/components/admin-action-dialog.tsx)는 dialog close/action 변경 시 reason을 초기화하도록 `resetKey`를 받는다. queues/alerts/operations 사용처가 action id/type을 전달한다. [`queues.tsx`](../apps/admin/src/routes/queues.tsx)는 raw `error.message` 대신 admin `translateError()` 결과를 i18n 문구로 표시한다. 신규 [`apps/admin/src/lib/translate-error.ts`](../apps/admin/src/lib/translate-error.ts)와 web 매핑에 `deposit_request_not_pending`을 추가하고, [`check-i18n-coverage.ts`](../scripts/check-i18n-coverage.ts)는 web/admin translate-error 파일을 합산해 서버 테스트 오류코드 매핑을 검증한다.
+- **E2E/오류→수정**: [`admin.spec.ts`](../tests/e2e/admin.spec.ts)의 operations feature toggle 테스트에 action A 성공 후 action B dialog reason empty + confirm disabled 단언을 추가했고, UI로 feature를 복구한다. 첫 E2E는 local service-role env 미주입으로 fail; `supabase status -o env`에서 로컬 키를 세션 env로 주입해 재실행했다.
+- **게이트**: `supabase db reset` green(000001~000068), `bun run test:sql` **31/31** green, `bun run typecheck` green, `bun run lint` green, `bun run check:i18n` green(web/admin error mapping 포함), `bun run check:release` green, `bunx playwright test tests/e2e/admin.spec.ts --grep "admin can toggle a feature flag"` green(1/1), `ReadLints` 0. 리모트 apply 0.
 
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 

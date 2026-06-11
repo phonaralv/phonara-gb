@@ -20,6 +20,7 @@ BEGIN
   VALUES (v_uid, 'authenticated', 'authenticated',
           'parity_' || v_uid::TEXT || '@test.local', NOW(), NOW());
 
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
 
@@ -93,6 +94,227 @@ BEGIN;
 
 DO $$
 DECLARE
+  v_uid UUID := gen_random_uuid();
+  v_market RECORD;
+  v_side TEXT;
+  v_entry NUMERIC;
+  v_open JSONB;
+  v_expected_liq NUMERIC;
+  v_max_plus TEXT;
+  v_rejected BOOLEAN;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated',
+          'parity_maxlev_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
+  UPDATE wallets SET usdt_available = '1000000.000000' WHERE user_id = v_uid;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
+
+  UPDATE app_config SET value = 'false' WHERE key IN ('system_halt', 'system_readonly');
+  UPDATE app_config SET value = 'true' WHERE key IN ('feature_futures_enabled', 'consent_gate_enabled');
+  UPDATE rpc_rate_limit_configs SET capacity = 100, refill_rate = 100 WHERE rpc_name = 'rpc_open_futures_position';
+  INSERT INTO user_consents (user_id, doc_type, doc_version, accepted)
+  SELECT v_uid, doc_type::consent_doc_type, 'test', TRUE
+  FROM unnest(ARRAY['terms_of_service','privacy_policy','risk_disclosure','age_verification']) AS doc_type
+  ON CONFLICT DO NOTHING;
+
+  UPDATE futures_markets
+     SET is_active = TRUE,
+         max_user_positions = 100,
+         max_open_interest = '1000000000.000000',
+         min_notional = '1.000000'
+   WHERE symbol IN ('PHONUSDT-PERP', 'BTCUSDT-SIM', 'ETHUSDT-SIM');
+  UPDATE market_circuit_breakers
+     SET is_halted = FALSE
+   WHERE symbol IN ('PHONUSDT-PERP', 'BTCUSDT-SIM', 'ETHUSDT-SIM');
+
+  INSERT INTO oracle_prices (symbol, price, updated_at)
+  VALUES
+    ('PHONUSDT-PERP', '0.012345', NOW()),
+    ('BTCUSDT-SIM', '68000.123456', NOW()),
+    ('ETHUSDT-SIM', '3500.654321', NOW())
+  ON CONFLICT (symbol) DO UPDATE SET price = EXCLUDED.price, updated_at = NOW();
+
+  FOR v_market IN
+    SELECT symbol, max_leverage::NUMERIC AS max_leverage, maintenance_margin_rate::NUMERIC AS mmr
+      FROM futures_markets
+     WHERE symbol IN ('PHONUSDT-PERP', 'BTCUSDT-SIM', 'ETHUSDT-SIM')
+     ORDER BY symbol
+  LOOP
+    SELECT price::NUMERIC INTO v_entry FROM oracle_prices WHERE symbol = v_market.symbol;
+
+    FOREACH v_side IN ARRAY ARRAY['long', 'short']
+    LOOP
+      v_open := rpc_open_futures_position(
+        v_market.symbol,
+        v_side,
+        'USDT',
+        '123.456789',
+        v_market.max_leverage::TEXT,
+        NULL,
+        NULL,
+        'max-boundary-' || v_market.symbol || '-' || v_side || '-' || v_uid::TEXT
+      );
+
+      IF v_side = 'long' THEN
+        v_expected_liq := v_entry * (1 - (1 / v_market.max_leverage) + v_market.mmr);
+      ELSE
+        v_expected_liq := v_entry * (1 + (1 / v_market.max_leverage) - v_market.mmr);
+      END IF;
+      IF v_expected_liq < 0 THEN v_expected_liq := 0; END IF;
+
+      ASSERT v_open->>'liquidation_price' = _fmt6(v_expected_liq),
+        format('%s %s max leverage liquidation parity failed: got=%s expected=%s',
+          v_market.symbol, v_side, v_open->>'liquidation_price', _fmt6(v_expected_liq));
+    END LOOP;
+
+    v_max_plus := _fmt6(v_market.max_leverage + 0.000001);
+    v_rejected := FALSE;
+    BEGIN
+      PERFORM rpc_open_futures_position(
+        v_market.symbol,
+        'long',
+        'USDT',
+        '123.456789',
+        v_max_plus,
+        NULL,
+        NULL,
+        'max-reject-' || v_market.symbol || '-' || v_uid::TEXT
+      );
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+      IF v_msg = 'leverage_too_high' THEN v_rejected := TRUE; END IF;
+    END;
+    ASSERT v_rejected,
+      format('%s just-over-max leverage must reject with leverage_too_high, got %s',
+        v_market.symbol, COALESCE(v_msg, '<none>'));
+  END LOOP;
+
+  RAISE NOTICE 'FUTURES MAX LEVERAGE BOUNDARY OK — max parity and just-over-max rejection verified';
+END;
+$$;
+
+ROLLBACK;
+
+BEGIN;
+
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+  v_open JSONB;
+  v_pos_id UUID;
+  v_liq NUMERIC;
+  v_tick NUMERIC := 0.000001;
+  v_blocked BOOLEAN;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated',
+          'parity_liq_boundary_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
+  UPDATE wallets SET usdt_available = '1000000.000000' WHERE user_id = v_uid;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
+
+  UPDATE app_config SET value = 'false' WHERE key IN ('system_halt', 'system_readonly');
+  UPDATE app_config SET value = 'true' WHERE key IN ('feature_futures_enabled', 'consent_gate_enabled');
+  UPDATE rpc_rate_limit_configs
+     SET capacity = 100, refill_rate = 100
+   WHERE rpc_name IN ('rpc_open_futures_position', 'rpc_liquidate_position');
+  INSERT INTO user_consents (user_id, doc_type, doc_version, accepted)
+  SELECT v_uid, doc_type::consent_doc_type, 'test', TRUE
+  FROM unnest(ARRAY['terms_of_service','privacy_policy','risk_disclosure','age_verification']) AS doc_type
+  ON CONFLICT DO NOTHING;
+
+  UPDATE futures_markets
+     SET is_active = TRUE,
+         max_leverage = '10',
+         max_user_positions = 100,
+         max_open_interest = '1000000000.000000',
+         min_notional = '1.000000'
+   WHERE symbol = 'PHONUSDT-PERP';
+  UPDATE market_circuit_breakers SET is_halted = FALSE WHERE symbol = 'PHONUSDT-PERP';
+
+  -- Long: one tick above liquidation price is not liquidatable.
+  INSERT INTO oracle_prices (symbol, price, updated_at)
+  VALUES ('PHONUSDT-PERP', '100.000000', NOW())
+  ON CONFLICT (symbol) DO UPDATE SET price = '100.000000', updated_at = NOW();
+  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'long', 'USDT', '100.000000', '10', NULL, NULL,
+    'liq-long-above-' || v_uid::TEXT);
+  v_pos_id := (v_open->>'position_id')::UUID;
+  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  UPDATE oracle_prices SET price = _fmt6(v_liq + v_tick), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_blocked := FALSE;
+  BEGIN
+    PERFORM rpc_liquidate_position(v_pos_id);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'not_liquidatable' THEN v_blocked := TRUE; END IF;
+  END;
+  ASSERT v_blocked, format('long one tick above liq must not liquidate, got %s', COALESCE(v_msg, '<none>'));
+
+  -- Long: exact liquidation price liquidates.
+  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'long', 'USDT', '100.000000', '10', NULL, NULL,
+    'liq-long-exact-' || v_uid::TEXT);
+  v_pos_id := (v_open->>'position_id')::UUID;
+  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  UPDATE oracle_prices SET price = _fmt6(v_liq), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  PERFORM rpc_liquidate_position(v_pos_id);
+
+  -- Long: one tick below liquidation price liquidates.
+  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'long', 'USDT', '100.000000', '10', NULL, NULL,
+    'liq-long-below-' || v_uid::TEXT);
+  v_pos_id := (v_open->>'position_id')::UUID;
+  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  UPDATE oracle_prices SET price = _fmt6(v_liq - v_tick), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  PERFORM rpc_liquidate_position(v_pos_id);
+
+  -- Short: one tick below liquidation price is not liquidatable.
+  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'short', 'USDT', '100.000000', '10', NULL, NULL,
+    'liq-short-below-' || v_uid::TEXT);
+  v_pos_id := (v_open->>'position_id')::UUID;
+  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  UPDATE oracle_prices SET price = _fmt6(v_liq - v_tick), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_blocked := FALSE;
+  BEGIN
+    PERFORM rpc_liquidate_position(v_pos_id);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'not_liquidatable' THEN v_blocked := TRUE; END IF;
+  END;
+  ASSERT v_blocked, format('short one tick below liq must not liquidate, got %s', COALESCE(v_msg, '<none>'));
+
+  -- Short: exact liquidation price liquidates.
+  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'short', 'USDT', '100.000000', '10', NULL, NULL,
+    'liq-short-exact-' || v_uid::TEXT);
+  v_pos_id := (v_open->>'position_id')::UUID;
+  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  UPDATE oracle_prices SET price = _fmt6(v_liq), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  PERFORM rpc_liquidate_position(v_pos_id);
+
+  -- Short: one tick above liquidation price liquidates.
+  UPDATE oracle_prices SET price = '100.000000', updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  v_open := rpc_open_futures_position('PHONUSDT-PERP', 'short', 'USDT', '100.000000', '10', NULL, NULL,
+    'liq-short-above-' || v_uid::TEXT);
+  v_pos_id := (v_open->>'position_id')::UUID;
+  v_liq := (v_open->>'liquidation_price')::NUMERIC;
+  UPDATE oracle_prices SET price = _fmt6(v_liq + v_tick), updated_at = NOW() WHERE symbol = 'PHONUSDT-PERP';
+  PERFORM rpc_liquidate_position(v_pos_id);
+
+  RAISE NOTICE 'FUTURES LIQUIDATION BOUNDARY OK — exact and +/- one tick decisions match TS rules';
+END;
+$$;
+
+ROLLBACK;
+
+BEGIN;
+
+DO $$
+DECLARE
   v_uid    UUID := gen_random_uuid();
   v_open   JSONB;
   v_close  JSONB;
@@ -101,6 +323,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'parity_short_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
 
@@ -157,6 +380,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'parity_loss_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
 
@@ -209,6 +433,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'parity_wipeout_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
 

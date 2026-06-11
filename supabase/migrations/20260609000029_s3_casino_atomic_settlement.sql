@@ -829,7 +829,7 @@ BEGIN
 
   INSERT INTO game_seed_reveals (round_id, server_seed)
   VALUES (p_round_id, v_round.server_seed)
-  ON CONFLICT DO NOTHING;
+  ON CONFLICT (round_id) DO NOTHING;
 
   RETURN jsonb_build_object(
     'round_id', p_round_id,

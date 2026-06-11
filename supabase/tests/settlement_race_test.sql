@@ -23,6 +23,7 @@ BEGIN
   VALUES (v_uid, 'authenticated', 'authenticated',
           'race_' || v_uid::TEXT || '@test.local', NOW(), NOW());
 
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
 

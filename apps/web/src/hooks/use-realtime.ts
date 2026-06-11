@@ -1,8 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
 type PostgresEvent = 'INSERT' | 'UPDATE' | 'DELETE' | '*';
+export type RealtimeConnectionStatus = 'disabled' | 'connecting' | 'subscribed' | 'closed' | 'channel_error' | 'timed_out';
+
+export interface UseRealtimeResult {
+  status: RealtimeConnectionStatus;
+  connected: boolean;
+}
 
 interface UseRealtimeOptions {
   /** Public table name to subscribe to. */
@@ -30,10 +36,11 @@ export function useRealtime({
   invalidate,
   onChange,
   enabled = true,
-}: UseRealtimeOptions): void {
+}: UseRealtimeOptions): UseRealtimeResult {
   const qc = useQueryClient();
   const onChangeRef = useRef(onChange);
   const invalidateRef = useRef(invalidate);
+  const [status, setStatus] = useState<RealtimeConnectionStatus>(enabled ? 'connecting' : 'disabled');
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -41,7 +48,12 @@ export function useRealtime({
   }, [onChange, invalidate]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setStatus('disabled');
+      return;
+    }
+
+    setStatus('connecting');
 
     const channel = supabase
       .channel(`rt:${table}:${filter ?? 'all'}:${event}`)
@@ -55,11 +67,18 @@ export function useRealtime({
           });
         },
       )
-      .subscribe();
+      .subscribe((nextStatus) => {
+        if (nextStatus === 'SUBSCRIBED') setStatus('subscribed');
+        else if (nextStatus === 'CHANNEL_ERROR') setStatus('channel_error');
+        else if (nextStatus === 'TIMED_OUT') setStatus('timed_out');
+        else if (nextStatus === 'CLOSED') setStatus('closed');
+      });
 
     return () => {
       void supabase.removeChannel(channel);
     };
     // Callback refs keep side effects fresh without resubscribe churn.
   }, [qc, table, filter, event, enabled]);
+
+  return { status, connected: status === 'subscribed' };
 }

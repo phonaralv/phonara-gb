@@ -44,6 +44,10 @@ test.describe('Admin RBAC', () => {
     await page.getByTestId('nav-audit').click();
     await expect(page.getByTestId('audit-page')).toBeVisible({ timeout: 10_000 });
 
+    // Navigate to ops alerts.
+    await page.getByTestId('nav-alerts').click();
+    await expect(page.getByTestId('admin-alerts-page')).toBeVisible({ timeout: 10_000 });
+
     // Navigate to exception queues.
     await page.getByTestId('nav-queues').click();
     await expect(page.getByTestId('admin-queues-page')).toBeVisible({ timeout: 10_000 });
@@ -120,21 +124,18 @@ test.describe('Admin Operations + Audit (S8c/S8d)', () => {
       .eq('action', 'feature_toggle');
     expect(auditAfter ?? 0, 'audit log should have 1 new entry').toBe((auditBefore ?? 0) + 1);
 
+    await page.getByTestId('ops-feature-game-toggle').click();
+    await expect(page.getByTestId('ops-confirm-reason')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId('ops-confirm-reason')).toHaveValue('');
+    await expect(page.getByTestId('ops-confirm-confirm')).toBeDisabled();
+    await page.getByTestId('ops-confirm-reason').fill('E2E restore game after reason reset check');
+    await page.getByTestId('ops-confirm-confirm').click();
+    await expect(page.getByTestId('ops-confirm-confirm')).not.toBeVisible({ timeout: 10_000 });
+
     // Navigate to audit page and verify the entry renders.
     await page.getByTestId('nav-audit').click();
     await expect(page.getByTestId('audit-page')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('audit-table')).toBeVisible({ timeout: 10_000 });
-
-    // Restore: re-enable the game feature.
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${adminAuth.accessToken}` } },
-    });
-    await userClient.rpc('rpc_set_feature_enabled', {
-      p_feature: 'game',
-      p_enabled: true,
-      p_reason: 'E2E test teardown: restore game feature',
-    });
   });
 
   test('negative: server-side guard blocks non-admin calling operations RPC directly', async () => {
@@ -219,6 +220,61 @@ test.describe('Admin Exception Queues (W9-R1)', () => {
     expect(auditCount ?? 0, 'reject action should be audited').toBeGreaterThan(0);
 
     await dbAdmin.from('app_config').update({ value: 'false' }).eq('key', 'feature_withdrawal_enabled');
+  });
+
+  test('admin can sync, acknowledge ops alert, and audit row is recorded', async ({ page }) => {
+    const adminAuth = readAdminAuth();
+    const dbAdmin = adminClient();
+
+    await dbAdmin.from('reconciliation_log').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+    await loginAdmin(page, adminAuth.email, 'E2e-Admin-Password-123456');
+    await expect(page.getByTestId('overview-page')).toBeVisible({ timeout: 20_000 });
+
+    await page.getByTestId('nav-alerts').click();
+    await expect(page.getByTestId('admin-alerts-page')).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId('ops-alerts-sync').click();
+
+    const alertRow = page.locator('[data-testid^="alert-ack-"]').first();
+    await expect(alertRow).toBeVisible({ timeout: 15_000 });
+    const testId = await alertRow.getAttribute('data-testid');
+    const alertId = testId?.replace('alert-ack-', '');
+    expect(alertId, 'alert id must be present in test id').toBeTruthy();
+
+    await alertRow.click();
+    await expect(page.getByTestId('admin-alert-action-reason')).toBeVisible({ timeout: 5_000 });
+    await page.getByTestId('admin-alert-action-reason').fill('E2E acknowledge operational alert');
+    await page.getByTestId('admin-alert-action-confirm').click();
+    await expect(page.getByTestId('admin-alert-action-confirm')).not.toBeVisible({ timeout: 10_000 });
+
+    const { data: alertRowDb } = await dbAdmin
+      .from('ops_alerts')
+      .select('status')
+      .eq('id', alertId!)
+      .single();
+    expect(alertRowDb?.status).toBe('acknowledged');
+
+    const { count: auditCount } = await dbAdmin
+      .from('audit_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('action', 'ops_alert_acknowledged')
+      .eq('entity_id', alertId!);
+    expect(auditCount ?? 0, 'ack action should be audited').toBeGreaterThan(0);
+  });
+
+  test('negative: non-admin cannot call ops alert RPC directly', async () => {
+    const auth = readAuth();
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${auth.accessToken}` } },
+    });
+    const { error } = await userClient.rpc('rpc_ack_ops_alert', {
+      p_alert_id: crypto.randomUUID(),
+      p_reason: 'E2E negative test',
+    });
+    expect(error, 'non-admin must be rejected by server-side guard').not.toBeNull();
+    expect(error?.message ?? '', 'error should mention forbidden').toMatch(/forbidden|Forbidden|403/i);
   });
 
   test('negative: non-admin cannot call queue resolution RPC directly', async () => {

@@ -119,6 +119,72 @@ test.describe('Wave 7 Phase 4 closeout', () => {
     expect(betsAfter ?? 0, 'cancel: bet count delta 0').toBe(betsBefore ?? 0);
   });
 
+  test('casino double confirm sends one bet RPC and keeps verification evidence visible', async ({ page }) => {
+    const auth = readAuth();
+    const admin = adminClient();
+    let betRequestCount = 0;
+
+    await admin
+      .from('app_config')
+      .update({ value: DEFAULT_MAX_PAYOUT_PHON })
+      .eq('key', 'casino_max_payout_phon');
+    await admin
+      .from('app_config')
+      .update({ value: 'true' })
+      .in('key', ['feature_game_enabled', 'feature_game_dice_enabled', 'consent_gate_enabled']);
+
+    await page.route(/.*\/rest\/v1\/rpc\/rpc_place_game_bet.*/, async (route) => {
+      betRequestCount += 1;
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+      await route.continue();
+    });
+
+    await injectSession(page, auth.accessToken, auth.refreshToken);
+    await page.goto('/casino/dice');
+    await expect(page.getByTestId('casino-fairness-verifier')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('casino-prepare-hash').click();
+    await expect(page.getByTestId('casino-place-bet')).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId('casino-place-bet').click();
+    await expect(page.getByTestId('casino-bet-confirm-confirm')).toBeVisible({ timeout: 5_000 });
+
+    const responsePromise = page.waitForResponse((response) => response.url().includes('rpc_place_game_bet'));
+    await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-testid="casino-bet-confirm-confirm"]');
+      button?.click();
+      button?.click();
+    });
+    const response = await responsePromise;
+    const placed = await response.json() as { result?: Record<string, unknown> };
+    const resultText = JSON.stringify(placed.result ?? {});
+
+    await expect(page.getByTestId('casino-bet-confirm-confirm')).toBeHidden({ timeout: 30_000 });
+    expect(betRequestCount, 'double confirm must emit one casino bet RPC').toBe(1);
+    await expect(page.getByTestId('casino-place-bet')).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByTestId('casino-fairness-verifier')).toContainText(resultText.slice(0, 24), {
+      timeout: 15_000,
+    });
+  });
+
+  test('casino client seed: auto value rotates per round while manual value is preserved', async ({ page }) => {
+    const auth = readAuth();
+
+    await injectSession(page, auth.accessToken, auth.refreshToken);
+    await page.goto('/casino/dice');
+    await expect(page.getByTestId('casino-fairness-verifier')).toBeVisible({ timeout: 15_000 });
+
+    const input = page.getByTestId('casino-client-seed-input');
+    const initialSeed = await input.inputValue();
+    await page.getByTestId('casino-prepare-hash').click();
+    await expect(page.getByTestId('casino-place-bet')).toBeEnabled({ timeout: 15_000 });
+    await expect(input).not.toHaveValue(initialSeed);
+
+    const manualSeed = `manual-client-seed-${Date.now()}`;
+    await input.fill(manualSeed);
+    await page.getByTestId('casino-prepare-hash').click();
+    await expect(page.getByTestId('casino-place-bet')).toBeEnabled({ timeout: 15_000 });
+    await expect(input).toHaveValue(manualSeed);
+  });
+
   test('daily claim and roulette: server authority and Σ conservation', async ({ page }) => {
     test.setTimeout(180_000);
     const auth = readAuth();

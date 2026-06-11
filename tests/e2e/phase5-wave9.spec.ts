@@ -92,6 +92,51 @@ test.describe.serial('Wave 9.1 — deposits, withdrawals, gates', () => {
       .eq('key', 'feature_withdrawal_enabled');
   });
 
+  test('withdrawal double confirm sends one RPC request', async ({ page }) => {
+    const auth = readAuth();
+    const admin = adminClient();
+    let requestCount = 0;
+
+    await admin.from('profiles').update({ kyc_tier: 'id_verified' }).eq('id', auth.userId);
+    await admin
+      .from('app_config')
+      .update({ value: 'true' })
+      .eq('key', 'feature_withdrawal_enabled');
+
+    await page.route(/.*\/rest\/v1\/rpc\/rpc_request_withdrawal.*/, async (route) => {
+      requestCount += 1;
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, withdrawal_id: crypto.randomUUID() }),
+      });
+    });
+
+    await injectSession(page, auth.accessToken, auth.refreshToken);
+    await page.goto('/wallet');
+    await page.getByTestId('wallet-tab-withdraw').click();
+    await page.getByTestId('wallet-withdraw-amount').fill('25.5');
+    await page.getByTestId('wallet-withdraw-address').fill('phonara-withdrawal-address-002');
+    await page.getByTestId('wallet-withdraw-submit').click();
+    await expect(page.getByTestId('wallet-withdraw-confirm')).toBeVisible();
+
+    const responsePromise = page.waitForResponse((response) => response.url().includes('rpc_request_withdrawal'));
+    await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-testid="wallet-withdraw-confirm"]');
+      button?.click();
+      button?.click();
+    });
+    await responsePromise;
+    await expect(page.getByTestId('wallet-withdraw-confirm')).toBeHidden({ timeout: 15_000 });
+    expect(requestCount, 'double confirm must emit one withdrawal RPC').toBe(1);
+
+    await admin
+      .from('app_config')
+      .update({ value: 'false' })
+      .eq('key', 'feature_withdrawal_enabled');
+  });
+
   test('frozen account can browse with sign-out and appeal actions visible', async ({ page }) => {
     const auth = readAuth();
     const admin = adminClient();

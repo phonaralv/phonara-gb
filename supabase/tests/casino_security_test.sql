@@ -18,6 +18,7 @@ BEGIN
     (v_admin, 'authenticated', 'authenticated', 'casino_admin_' || v_admin::TEXT || '@test.local', NOW(), NOW()),
     (v_user, 'authenticated', 'authenticated', 'casino_void_' || v_user::TEXT || '@test.local', NOW(), NOW());
   UPDATE profiles SET role = 'admin' WHERE id = v_admin;
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_user;
 
   PERFORM set_config('request.jwt.claims', '{}', true);

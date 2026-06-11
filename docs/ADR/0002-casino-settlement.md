@@ -21,11 +21,15 @@ The fixed ADR set is:
 - ADR-005: `game_house_phon` and `game_house_usdt` are casino house counterparties. Insurance remains separate. Solvency is enforced at the Wave 9 withdrawal gate, not per bet.
 - ADR-006: `_assert_game_exposure_cap` protects max payout, Limbo max target, and game/house exposure before accepting a bet.
 - ADR-007: With real users at zero, local casino migrations remain batchable to Wave 12. If any real user appears before Wave 12, live hardening escalates before remote changes.
+- ADR-008: `rpc_reveal_game_round` intentionally does not check the game kill switch. Once a bet has reached terminal settlement, revealing the seed is evidence disclosure, not new risk-taking; users must be able to verify completed rounds even during an incident.
+- ADR-009: Phase 4 casino rounds are one-shot rounds, so `nonce = 1` is intentional for every bet. Multi-action sessions such as live Crash and progressive Mines require a separate Phase 4.5 session model with monotonic nonce enforcement.
+- ADR-010: `server_seed` is stored as plaintext in protected database columns until reveal. Direct client access is blocked, and the browser now refreshes the default `client_seed` for each newly opened round to reduce repeated-input predictability. Encrypting stored server seeds is a backlog hardening item and is explicitly outside this ADR's implementation scope.
 
 ## Consequences
 
 - `rpc_place_game_bet` has exactly six entry guards: `_assert_amount_text`, `_fmt6` quantization, token-bucket rate limit, min/max stake, global plus per-game feature/consent gates, and `_assert_game_exposure_cap`.
 - `server_seed` is stored in protected table columns and exposed only after terminal settlement through `rpc_reveal_game_round`.
+- `game_seed_reveals.round_id` is unique; repeated reveal calls are idempotent and keep one evidence row while returning the same seed.
 - Public round reads use `v_game_rounds_public`; direct `game_rounds` table SELECT is revoked from `anon` and `authenticated`.
 - Stale pending bets are swept by pg_cron after `casino_stale_pending_minutes`, excluding `parity_hold`.
 - Admin void requires an authenticated admin, a reason, and an audit row.

@@ -47,6 +47,197 @@ END;
 $$;
 ROLLBACK;
 
+-- ── RED: admin must not approve their own withdrawal ─────────────────────────
+BEGIN;
+DO $$
+DECLARE
+  v_admin_user UUID := gen_random_uuid();
+  v_res JSONB;
+  v_wr_id UUID;
+  v_blocked BOOLEAN := FALSE;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_admin_user, 'authenticated', 'authenticated',
+          'wd_self_admin_' || v_admin_user::TEXT || '@test.local', NOW(), NOW());
+
+  UPDATE profiles SET role = 'admin', kyc_tier = 'id_verified' WHERE id = v_admin_user;
+  PERFORM _credit_wallet_internal(v_admin_user, 'PHON', '100.000000',
+    'test_funding', 'wd-self-approve-fund-001');
+  PERFORM _debit_system_account('reward_issuance_phon', '100.000000',
+    'test_funding', v_admin_user, 'wd-self-approve-fund-001', NULL);
+
+  INSERT INTO user_consents (user_id, doc_type, doc_version, accepted)
+  SELECT v_admin_user, doc_type::consent_doc_type, 'test', TRUE
+    FROM unnest(ARRAY[
+      'terms_of_service','privacy_policy','risk_disclosure','age_verification'
+    ]::TEXT[]) AS doc_type;
+  INSERT INTO sanctions_screenings (user_id, status, screened_at)
+  VALUES (v_admin_user, 'clear', NOW());
+
+  UPDATE app_config SET value = 'false'
+    WHERE key IN ('system_halt', 'system_readonly', 'consent_gate_enabled');
+  UPDATE app_config SET value = 'true' WHERE key = 'feature_withdrawal_enabled';
+  UPDATE treasury_reserves SET real_balance = '99999999.000000' WHERE currency = 'PHON';
+  PERFORM rpc_run_reconciliation();
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_user::TEXT)::TEXT, true);
+  v_res := rpc_request_withdrawal('PHON', '10.000000', '{}'::JSONB, 'wd-self-approve-001', NULL);
+  v_wr_id := (v_res->>'withdrawal_id')::UUID;
+
+  BEGIN
+    PERFORM rpc_approve_withdrawal(v_wr_id, 'self approval must be blocked');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'self_approval_forbidden' THEN v_blocked := TRUE; END IF;
+  END;
+
+  ASSERT v_blocked,
+    format('admin must not approve own withdrawal, got: %s', COALESCE(v_msg, '<none>'));
+
+  RAISE NOTICE 'WITHDRAWAL SELF APPROVAL BLOCK OK';
+END;
+$$;
+ROLLBACK;
+
+-- ── RED: withdrawal feature-off blocks approve and mark-sent ─────────────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+  v_admin UUID := gen_random_uuid();
+  v_res JSONB;
+  v_wr_approve UUID;
+  v_wr_sent UUID;
+  v_approve_blocked BOOLEAN := FALSE;
+  v_sent_blocked BOOLEAN := FALSE;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES
+    (v_uid, 'authenticated', 'authenticated', 'wd_feature_user_' || v_uid::TEXT || '@test.local', NOW(), NOW()),
+    (v_admin, 'authenticated', 'authenticated', 'wd_feature_admin_' || v_admin::TEXT || '@test.local', NOW(), NOW());
+
+  UPDATE profiles SET kyc_tier = 'id_verified' WHERE id = v_uid;
+  UPDATE profiles SET role = 'admin' WHERE id = v_admin;
+  PERFORM _credit_wallet_internal(v_uid, 'PHON', '100.000000',
+    'test_funding', 'wd-feature-off-fund-001');
+  PERFORM _debit_system_account('reward_issuance_phon', '100.000000',
+    'test_funding', v_uid, 'wd-feature-off-fund-001', NULL);
+
+  INSERT INTO user_consents (user_id, doc_type, doc_version, accepted)
+  SELECT v_uid, doc_type::consent_doc_type, 'test', TRUE
+    FROM unnest(ARRAY[
+      'terms_of_service','privacy_policy','risk_disclosure','age_verification'
+    ]::TEXT[]) AS doc_type;
+  INSERT INTO sanctions_screenings (user_id, status, screened_at)
+  VALUES (v_uid, 'clear', NOW());
+
+  UPDATE app_config SET value = 'false'
+    WHERE key IN ('system_halt', 'system_readonly', 'consent_gate_enabled');
+  UPDATE app_config SET value = 'true' WHERE key = 'feature_withdrawal_enabled';
+  UPDATE treasury_reserves SET real_balance = '99999999.000000' WHERE currency = 'PHON';
+  PERFORM rpc_run_reconciliation();
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
+  v_res := rpc_request_withdrawal('PHON', '10.000000', '{}'::JSONB, 'wd-feature-approve-001', NULL);
+  v_wr_approve := (v_res->>'withdrawal_id')::UUID;
+  v_res := rpc_request_withdrawal('PHON', '10.000000', '{}'::JSONB, 'wd-feature-sent-001', NULL);
+  v_wr_sent := (v_res->>'withdrawal_id')::UUID;
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin::TEXT)::TEXT, true);
+  PERFORM rpc_approve_withdrawal(v_wr_sent, 'prepare sent feature-off case');
+
+  UPDATE app_config SET value = 'false' WHERE key = 'feature_withdrawal_enabled';
+
+  BEGIN
+    PERFORM rpc_approve_withdrawal(v_wr_approve, 'feature off approve must fail');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'feature_disabled' THEN v_approve_blocked := TRUE; END IF;
+  END;
+
+  v_msg := NULL;
+  BEGIN
+    PERFORM rpc_mark_withdrawal_sent(v_wr_sent, 'feature off sent must fail');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'feature_disabled' THEN v_sent_blocked := TRUE; END IF;
+  END;
+
+  ASSERT v_approve_blocked,
+    format('feature_withdrawal_enabled=false must block approve, got: %s', COALESCE(v_msg, '<none>'));
+  ASSERT v_sent_blocked,
+    format('feature_withdrawal_enabled=false must block mark sent, got: %s', COALESCE(v_msg, '<none>'));
+
+  RAISE NOTICE 'WITHDRAWAL FEATURE-OFF APPROVE/SENT BLOCK OK';
+END;
+$$;
+ROLLBACK;
+
+-- ── Regression: approve idempotency and feature-off ordering ─────────────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+  v_admin UUID := gen_random_uuid();
+  v_res JSONB;
+  v_wr_id UUID;
+  v_feature_off_blocked BOOLEAN := FALSE;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES
+    (v_uid, 'authenticated', 'authenticated', 'wd_idem_user_' || v_uid::TEXT || '@test.local', NOW(), NOW()),
+    (v_admin, 'authenticated', 'authenticated', 'wd_idem_admin_' || v_admin::TEXT || '@test.local', NOW(), NOW());
+
+  UPDATE profiles SET kyc_tier = 'id_verified' WHERE id = v_uid;
+  UPDATE profiles SET role = 'admin' WHERE id = v_admin;
+  PERFORM _credit_wallet_internal(v_uid, 'PHON', '50.000000',
+    'test_funding', 'wd-idem-fund-001');
+  PERFORM _debit_system_account('reward_issuance_phon', '50.000000',
+    'test_funding', v_uid, 'wd-idem-fund-001', NULL);
+
+  INSERT INTO user_consents (user_id, doc_type, doc_version, accepted)
+  SELECT v_uid, doc_type::consent_doc_type, 'test', TRUE
+    FROM unnest(ARRAY[
+      'terms_of_service','privacy_policy','risk_disclosure','age_verification'
+    ]::TEXT[]) AS doc_type;
+  INSERT INTO sanctions_screenings (user_id, status, screened_at)
+  VALUES (v_uid, 'clear', NOW());
+
+  UPDATE app_config SET value = 'false'
+    WHERE key IN ('system_halt', 'system_readonly', 'consent_gate_enabled');
+  UPDATE app_config SET value = 'true' WHERE key = 'feature_withdrawal_enabled';
+  UPDATE treasury_reserves SET real_balance = '99999999.000000' WHERE currency = 'PHON';
+  PERFORM rpc_run_reconciliation();
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
+  v_res := rpc_request_withdrawal('PHON', '10.000000', '{}'::JSONB, 'wd-idem-approve-001', NULL);
+  v_wr_id := (v_res->>'withdrawal_id')::UUID;
+
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin::TEXT)::TEXT, true);
+  PERFORM rpc_approve_withdrawal(v_wr_id, 'initial approval');
+  v_res := rpc_approve_withdrawal(v_wr_id, 'idempotent approval');
+  ASSERT v_res->>'idempotent' = 'true',
+    format('approved withdrawal re-approve must remain idempotent when feature is on, got %s', v_res);
+
+  UPDATE app_config SET value = 'false' WHERE key = 'feature_withdrawal_enabled';
+  BEGIN
+    PERFORM rpc_approve_withdrawal(v_wr_id, 'feature off idempotent ordering check');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'feature_disabled' THEN v_feature_off_blocked := TRUE; END IF;
+  END;
+
+  ASSERT v_feature_off_blocked,
+    format('feature-off approved re-approve must hit feature guard before idempotent return, got: %s', COALESCE(v_msg, '<none>'));
+
+  RAISE NOTICE 'WITHDRAWAL APPROVE IDEMPOTENCY ORDER OK';
+END;
+$$;
+ROLLBACK;
+
 -- ── P0 lifecycle RED-first: request locks, reject refunds exactly ─────────────
 BEGIN;
 DO $$

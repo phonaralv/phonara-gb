@@ -179,7 +179,7 @@ BEGIN
   ASSERT v_cron_jobid IS NOT NULL, 'phonara_auto_liquidations cron job must exist for ops health tests';
 
   DELETE FROM cron.job_run_details WHERE jobid = v_cron_jobid;
-  SELECT COALESCE(MAX(runid), 0) + 1 INTO v_next_runid FROM cron.job_run_details WHERE jobid = v_cron_jobid;
+  SELECT COALESCE(MAX(runid), 0) + 1 INTO v_next_runid FROM cron.job_run_details;
   INSERT INTO cron.job_run_details (
     jobid, runid, job_pid, database, username, command, status, return_message, start_time, end_time
   )
@@ -206,7 +206,7 @@ BEGIN
 
   -- cron: latest failed but recent success -> warning
   DELETE FROM cron.job_run_details WHERE jobid = v_cron_jobid;
-  SELECT COALESCE(MAX(runid), 0) + 1 INTO v_next_runid FROM cron.job_run_details WHERE jobid = v_cron_jobid;
+  SELECT COALESCE(MAX(runid), 0) + 1 INTO v_next_runid FROM cron.job_run_details;
   INSERT INTO cron.job_run_details (
     jobid, runid, job_pid, database, username, command, status, return_message, start_time, end_time
   )
@@ -224,7 +224,7 @@ BEGIN
   FROM cron.job j
   WHERE j.jobid = v_cron_jobid;
 
-  SELECT COALESCE(MAX(runid), 0) + 1 INTO v_next_runid FROM cron.job_run_details WHERE jobid = v_cron_jobid;
+  SELECT COALESCE(MAX(runid), 0) + 1 INTO v_next_runid FROM cron.job_run_details;
   INSERT INTO cron.job_run_details (
     jobid, runid, job_pid, database, username, command, status, return_message, start_time, end_time
   )
@@ -409,6 +409,7 @@ BEGIN
   -- treasury_solvency: coverage breach -> critical
   UPDATE treasury_reserves SET real_balance = '100.000000', buffer_pct = 10, updated_at = NOW()
   WHERE currency = 'PHON';
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '95.000000', phon_locked = '0.000000'
   WHERE user_id = v_user;
   ASSERT FOUND, 'test user wallet must exist for treasury solvency breach case';
@@ -422,6 +423,7 @@ BEGIN
   -- treasury_solvency: unconfigured reserve -> critical
   UPDATE treasury_reserves SET real_balance = '1000000.000000', updated_at = NOW()
   WHERE currency = 'PHON';
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '0.000000', phon_locked = '0.000000'
   WHERE user_id = v_user;
   UPDATE treasury_reserves SET real_balance = '0.000000', updated_at = NOW()

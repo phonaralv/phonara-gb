@@ -1,0 +1,18 @@
+---
+description: Audit and test discipline for read-only reviews, RED-first fixes, and invariant-focused tests
+alwaysApply: true
+---
+
+# Audit / Test Discipline
+
+- 감사 요청 시 READ-ONLY 엄수: 분석 단계에서는 파일 수정·테스트 작성·실행 금지.
+- 판정에는 반드시 근거 파일:라인 첨부. 확인 불가하면 `UNVERIFIED`로 표기하고
+  추측으로 PASS/FAIL 판정하지 않는다.
+- 머니 게이트 수정은 RED-first TDD: 버그를 재현하는 실패 테스트를 먼저 작성하고
+  실패를 확인한 뒤에만 구현한다. RED가 나오지 않으면 그 이유를 보고하고 진행한다.
+- E2E/SQL 테스트에서 잔액 절대값 단언 금지. delta 또는 보존(Σ=0) 단언만 사용.
+  단, delta와 기대값(입금액 등)의 일치 단언은 보존 검증이므로 허용.
+- 테스트가 깨질 때 guard/제약/단언을 약화시켜 통과시키는 것 금지.
+  깨지는 테스트는 원인을 보고하고 지시를 대기한다.
+- 지시된 수정 범위를 벗어난 리팩토링 금지. 범위 밖 문제를 발견하면
+  수정하지 말고 보고만 한다.

@@ -11,6 +11,10 @@ const ERROR_KEY_MAP: ReadonlyArray<readonly [string, MessageKey]> = [
   ['system_halted', 'error.SYSTEM_HALTED'],
   ['system_readonly', 'error.SYSTEM_HALTED'],
   ['feature_disabled', 'error.FEATURE_DISABLED'],
+  ['below_min_notional', 'error.BELOW_MIN_NOTIONAL'],
+  ['self_approval_forbidden', 'error.SELF_APPROVAL_FORBIDDEN'],
+  ['deposit_request_not_pending', 'error.DEPOSIT_REQUEST_NOT_PENDING'],
+  ['phon_krw_rate_unavailable', 'error.PHON_KRW_RATE_UNAVAILABLE'],
   ['market_halted', 'error.MARKET_HALTED'],
   ['stale_price', 'error.NO_PRICE'],
   ['no_price', 'error.NO_PRICE'],
@@ -26,6 +30,8 @@ const ERROR_KEY_MAP: ReadonlyArray<readonly [string, MessageKey]> = [
   ['invalid_amount', 'error.INVALID_AMOUNT'],
   ['invalid_side', 'error.INVALID_INPUT'],
   ['invalid_price', 'error.INVALID_INPUT'],
+  ['invalid_currency', 'error.INVALID_INPUT'],
+  ['reason_required', 'error.INVALID_INPUT'],
   ['not_liquidatable', 'error.NOT_LIQUIDATABLE'],
   ['still_locked', 'error.STILL_LOCKED'],
   ['position_not_found', 'error.POSITION_NOT_FOUND'],
@@ -43,6 +49,10 @@ const ERROR_KEY_MAP: ReadonlyArray<readonly [string, MessageKey]> = [
   ['withdrawal_solvency_hold', 'error.WITHDRAWAL_SOLVENCY_HOLD'],
   ['account_activity_frozen', 'error.ACCOUNT_ACTIVITY_FROZEN'],
   ['duplicate_transfer_id', 'error.DUPLICATE_REQUEST'],
+  ['unique_violation', 'error.DUPLICATE_REQUEST'],
+  ['append_only_violation', 'error.FORBIDDEN'],
+  ['ledger_write_not_allowed', 'error.FORBIDDEN'],
+  ['attested_change_requires_confirm', 'error.FORBIDDEN'],
 ];
 
 /**

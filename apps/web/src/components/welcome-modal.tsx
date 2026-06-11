@@ -116,7 +116,7 @@ export function WelcomeModal({ onDismiss }: WelcomeModalProps) {
               +{formatMoney(result.phon_awarded, 'PHON')} PHON
             </div>
             <div className="earned-krw">
-              {t('welcome.earnedKrw', { amount: formatMoney(result.phon_awarded, 'KRW') })}
+              {t('welcome.earnedPhon', { amount: formatMoney(result.phon_awarded, 'PHON') })}
             </div>
           </div>
           {isPositiveAmount(String(result.referral_bonus)) && (

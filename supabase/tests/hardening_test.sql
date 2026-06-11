@@ -63,6 +63,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'h_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -102,6 +103,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'h2_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -138,6 +140,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'h3_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -174,6 +177,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'live_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -228,6 +232,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'feat_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000.000000', phon_available = '1000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -274,6 +279,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'cap_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -331,6 +337,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'idem_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -359,6 +366,86 @@ BEGIN
   ASSERT v_count = 2, 'fresh request id should open a new position, got ' || v_count;
 
   RAISE NOTICE 'A4f REQUEST IDEMPOTENCY OK — duplicate id blocked, fresh id allowed';
+END;
+$$;
+ROLLBACK;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- A4g: Market min_notional is enforced on futures and spot entry RPCs
+-- ─────────────────────────────────────────────────────────────────────────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid UUID := gen_random_uuid();
+  v_blocked BOOLEAN;
+  v_msg TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated', 'min_notional_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
+  UPDATE wallets SET usdt_available = '1000000.000000', phon_available = '1000000.000000' WHERE user_id = v_uid;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
+  UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
+  UPDATE app_config SET value = 'true' WHERE key IN ('feature_futures_enabled', 'feature_spot_enabled');
+
+  INSERT INTO oracle_prices (symbol, price, updated_at)
+  VALUES
+    ('PHONUSDT-PERP', '1.000000', NOW()),
+    ('PHON_USDT', '1.000000', NOW())
+  ON CONFLICT (symbol) DO UPDATE SET price = EXCLUDED.price, updated_at = NOW();
+  UPDATE market_circuit_breakers SET is_halted = FALSE WHERE symbol IN ('PHONUSDT-PERP', 'PHON_USDT');
+  UPDATE futures_markets
+     SET is_active = TRUE,
+         max_user_positions = 100,
+         max_open_interest = '1000000.000000',
+         max_leverage = '10',
+         min_notional = '10.000000'
+   WHERE symbol = 'PHONUSDT-PERP';
+  UPDATE spot_markets
+     SET is_active = TRUE,
+         min_notional = '10.000000'
+   WHERE symbol = 'PHON_USDT';
+
+  v_blocked := FALSE;
+  BEGIN
+    PERFORM rpc_open_futures_position(
+      'PHONUSDT-PERP', 'long', 'USDT', '4.000000', '2', NULL, NULL,
+      'below-min-futures-' || v_uid::TEXT
+    );
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'below_min_notional' THEN v_blocked := TRUE; END IF;
+  END;
+  ASSERT v_blocked,
+    format('futures open below min_notional must raise below_min_notional, got %s', COALESCE(v_msg, '<none>'));
+
+  v_blocked := FALSE;
+  BEGIN
+    PERFORM rpc_spot_market_buy('5.000000', 'below-min-spot-buy-' || v_uid::TEXT);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'below_min_notional' THEN v_blocked := TRUE; END IF;
+  END;
+  ASSERT v_blocked,
+    format('spot buy below min_notional must raise below_min_notional, got %s', COALESCE(v_msg, '<none>'));
+
+  v_blocked := FALSE;
+  BEGIN
+    PERFORM rpc_spot_market_sell('5.000000', 'below-min-spot-sell-' || v_uid::TEXT);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg = 'below_min_notional' THEN v_blocked := TRUE; END IF;
+  END;
+  ASSERT v_blocked,
+    format('spot sell below min_notional must raise below_min_notional, got %s', COALESCE(v_msg, '<none>'));
+
+  PERFORM rpc_open_futures_position('PHONUSDT-PERP', 'long', 'USDT', '5.000000', '2', NULL, NULL,
+    'at-min-futures-' || v_uid::TEXT);
+  PERFORM rpc_spot_market_buy('10.000000', 'at-min-spot-buy-' || v_uid::TEXT);
+  PERFORM rpc_spot_market_sell('10.000000', 'at-min-spot-sell-' || v_uid::TEXT);
+
+  RAISE NOTICE 'MIN NOTIONAL OK — futures and spot reject below min_notional and allow exact boundary';
 END;
 $$;
 ROLLBACK;
@@ -447,6 +534,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'l_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '100000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -518,6 +606,7 @@ BEGIN
   -- cron job invokes) and assert it persists an actionable log row.
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'lc_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '100000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';
@@ -549,6 +638,53 @@ $$;
 ROLLBACK;
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- INTERNAL HELPER AMOUNT GUARDS: direct helper calls reject <= 0 amounts
+-- ─────────────────────────────────────────────────────────────────────────────
+BEGIN;
+DO $$
+DECLARE
+  v_uid        UUID := gen_random_uuid();
+  v_before     NUMERIC;
+  v_after      NUMERIC;
+  v_msg        TEXT;
+  v_blocked    BOOLEAN := FALSE;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated', 'helper_guard_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
+  UPDATE wallets SET phon_available = '100.000000' WHERE user_id = v_uid;
+  SELECT phon_available::NUMERIC INTO v_before FROM wallets WHERE user_id = v_uid;
+
+  BEGIN
+    PERFORM _debit_wallet_internal(
+      v_uid,
+      'PHON',
+      '-1.000000',
+      'helper_negative_probe',
+      'helper-negative-debit:' || v_uid::TEXT
+    );
+  EXCEPTION WHEN OTHERS THEN
+    v_msg := SQLERRM;
+    IF v_msg = 'invalid_amount' THEN
+      v_blocked := TRUE;
+    END IF;
+  END;
+
+  SELECT phon_available::NUMERIC INTO v_after FROM wallets WHERE user_id = v_uid;
+
+  ASSERT v_blocked,
+    format('negative _debit_wallet_internal must raise invalid_amount, got %s', COALESCE(v_msg, '<none>'));
+  ASSERT v_after = v_before,
+    format('negative _debit_wallet_internal changed balance from %s to %s', v_before, v_after);
+
+  RAISE NOTICE 'INTERNAL HELPER AMOUNT GUARD OK — negative direct debit blocked with invalid_amount';
+END;
+$$;
+ROLLBACK;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- INPUT GUARD: entry RPCs reject NaN/Infinity/garbage amounts (migration 000016)
 -- ─────────────────────────────────────────────────────────────────────────────
 BEGIN;
@@ -561,6 +697,7 @@ DECLARE
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated', 'ig_' || v_uid::TEXT || '@t.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '100000.000000', phon_available = '100000.000000' WHERE user_id = v_uid;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid::TEXT)::TEXT, true);
   UPDATE app_config SET value = 'false' WHERE key = 'consent_gate_enabled';

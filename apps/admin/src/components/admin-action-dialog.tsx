@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Button, Input } from '@phonara/ui';
 import { useT } from '../lib/i18n';
 
@@ -12,6 +12,8 @@ export interface AdminActionDialogProps {
   tone?: 'primary' | 'danger';
   busy?: boolean;
   testId?: string;
+  /** Changes when a different admin action is being confirmed. */
+  resetKey?: string | null;
   /** Called with the reason text when the admin confirms. */
   onConfirm: (reason: string) => void;
   onCancel: () => void;
@@ -32,11 +34,16 @@ export function AdminActionDialog({
   tone = 'danger',
   busy = false,
   testId,
+  resetKey,
   onConfirm,
   onCancel,
 }: AdminActionDialogProps) {
   const t = useT();
   const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    setReason('');
+  }, [open, resetKey]);
 
   function handleConfirm() {
     if (!reason.trim()) return;

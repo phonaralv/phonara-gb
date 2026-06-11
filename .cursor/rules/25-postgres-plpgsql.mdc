@@ -32,6 +32,14 @@ applied or the specific SQL branch executed. Treat every item as mandatory.
   `profiles` and `wallets` rows. Never manually `INSERT` those (pkey conflict);
   `UPDATE` the auto-created rows instead (e.g. to fund a test wallet).
 
+## Migration discipline
+
+- Retroactively editing an existing migration file is allowed only when BOTH are
+  true: (1) git / Build Log evidence confirms the migration has not been applied
+  remotely, and (2) the work report explicitly states why the retroactive edit
+  was necessary. After a migration is remotely applied, every change must be made
+  through a new migration file; never rewrite the applied migration.
+
 ## Function exposure & privileges (PostgREST)
 
 - Every function in the `public` schema is exposed over PostgREST and EXECUTE is

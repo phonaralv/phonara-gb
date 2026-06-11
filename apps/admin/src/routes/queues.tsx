@@ -5,6 +5,7 @@ import { Route as rootRoute } from './__root';
 import { AdminLayout } from '../components/admin-layout';
 import { AdminActionDialog } from '../components/admin-action-dialog';
 import { supabase } from '../lib/supabase';
+import { translateError } from '../lib/translate-error';
 import { useT } from '../lib/i18n';
 import { Badge, Button, Card, DataTable, type ColumnDef } from '@phonara/ui';
 import type { Tables } from '@phonara/shared-types';
@@ -267,7 +268,7 @@ export function QueuesPage() {
       ]);
       setAction(null);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : t('error.UNKNOWN'));
+      setErrorMsg(t(translateError(err)));
     } finally {
       setBusy(false);
     }
@@ -337,6 +338,7 @@ export function QueuesPage() {
         tone={action?.kind === 'rejectWithdrawal' || action?.kind === 'dismissStr' || action?.kind === 'rejectKyc' ? 'danger' : 'primary'}
         busy={busy}
         testId="admin-queue-action"
+        resetKey={actionKey(action)}
         onConfirm={handleConfirm}
         onCancel={() => setAction(null)}
       />
@@ -587,4 +589,8 @@ function actionTitle(action: QueueAction | null, t: ReturnType<typeof useT>) {
     case 'rejectKyc':
       return t('admin.queues.dialog.rejectKyc');
   }
+}
+
+function actionKey(action: QueueAction | null): string | null {
+  return action ? `${action.kind}:${action.id}` : null;
 }

@@ -183,11 +183,20 @@ function OperationsPage() {
         }
         busy={busy}
         testId="ops-confirm"
+        resetKey={dialogKey(dialog)}
         onConfirm={handleConfirm}
         onCancel={() => setDialog(null)}
       />
     </AdminLayout>
   );
+}
+
+function dialogKey(dialog: {
+  type: 'system_halt' | 'system_readonly' | 'feature';
+  feature?: FeatureKey;
+  targetValue: boolean;
+} | null): string | null {
+  return dialog ? `${dialog.type}:${dialog.feature ?? ''}:${String(dialog.targetValue)}` : null;
 }
 
 interface ToggleRowProps {

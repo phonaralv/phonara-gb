@@ -22,6 +22,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'casino_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
 
   UPDATE app_config SET value = 'false'
@@ -86,6 +87,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'casino_client_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
 
   UPDATE app_config SET value = 'false'
@@ -146,6 +148,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid2, 'authenticated', 'authenticated',
           'casino_idem_' || v_uid2::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id IN (v_uid, v_uid2);
   UPDATE app_config SET value = 'false'
     WHERE key IN ('system_halt', 'system_readonly', 'consent_gate_enabled');
@@ -211,6 +214,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'casino_cap_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
   UPDATE app_config SET value = 'true'
     WHERE key IN ('feature_game_enabled', 'feature_game_dice_enabled');
@@ -250,6 +254,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'casino_parity_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
   UPDATE app_config SET value = 'true'
     WHERE key IN ('feature_game_enabled', 'feature_game_dice_enabled');
@@ -298,6 +303,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'casino_stale_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
 
   PERFORM set_config('request.jwt.claims', '{}', true);
@@ -332,10 +338,13 @@ DECLARE
   v_uid UUID := gen_random_uuid();
   v_round_id UUID;
   v_reveal JSONB;
+  v_reveal_again JSONB;
+  v_reveal_count INT;
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'casino_reveal_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
   UPDATE app_config SET value = 'true'
     WHERE key IN ('feature_game_enabled', 'feature_game_dice_enabled');
@@ -355,7 +364,14 @@ BEGIN
   ASSERT v_reveal->>'server_seed' = 'reveal_seed_value_for_validation',
     'reveal must return committed server seed after settlement';
 
-  RAISE NOTICE 'CASINO REVEAL OK — seed revealed after terminal settlement';
+  v_reveal_again := rpc_reveal_game_round(v_round_id);
+  ASSERT v_reveal_again->>'server_seed' = v_reveal->>'server_seed',
+    'repeat reveal must return the same committed server seed';
+  SELECT count(*) INTO v_reveal_count FROM game_seed_reveals WHERE round_id = v_round_id;
+  ASSERT v_reveal_count = 1,
+    format('repeat reveal must write one seed log row, got %s', v_reveal_count);
+
+  RAISE NOTICE 'CASINO REVEAL OK — seed revealed after terminal settlement and repeat reveal is idempotent';
 END;
 $$;
 ROLLBACK;

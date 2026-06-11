@@ -89,6 +89,10 @@ jobs:
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54442/postgres
         run: bun run test:sql
+      - name: Run casino TS to SQL parity (6 games x 1000 seeds)
+        env:
+          PHONARA_SQL_PARITY: "1"
+        run: bunx vitest run tests/integration/casino-sql-parity.test.ts
       - name: Stop local Supabase stack
         if: always()
         run: supabase stop --no-backup

@@ -41,7 +41,8 @@ BEGIN
   VALUES (v_uid, 'authenticated', 'authenticated',
           'conservation_' || v_uid::TEXT || '@test.local', NOW(), NOW());
 
-  -- Fund the auto-created wallet (on_auth_user_created inserts it with zero balances)
+  -- Fund the auto-created wallet (fixture-only privileged write).
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000000.000000', usdt_available = '1000000.000000'
   WHERE user_id = v_uid;
 

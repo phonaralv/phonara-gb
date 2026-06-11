@@ -7,6 +7,7 @@ import {
   AUTH_FILE,
   ADMIN_AUTH_FILE,
   adminClient,
+  fundE2EWallet,
   resetE2EOracleState,
 } from './_helpers';
 
@@ -78,14 +79,8 @@ async function globalSetup(): Promise<void> {
 
   await waitForProfileAndWallet(admin, userId, 'user');
 
-  // Fund the auto-created wallet generously.
-  const { data: funded, error: wErr } = await admin
-    .from('wallets')
-    .update({ usdt_available: '1000000.000000', phon_available: '1000000.000000' })
-    .eq('user_id', userId)
-    .select('user_id');
-  if (wErr) throw new Error(`fund wallet failed: ${wErr.message}`);
-  if (!funded?.length) throw new Error('fund wallet failed: 0 rows updated (trigger race)');
+  // Fund the auto-created wallet generously through the local ledger-write guard.
+  fundE2EWallet(userId, { phon: '1000000.000000', usdt: '1000000.000000' });
 
   // Record onboarding consents (the gate is a no-op unless enabled, but be explicit).
   const { error: ceErr } = await admin.from('user_consents').insert(

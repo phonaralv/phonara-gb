@@ -2,6 +2,24 @@
 -- Phase 5 — KRW deposit reconciliation tests (Wave 9.1)
 -- ============================================================
 
+-- ── Test -1: pending deposit match row is locked before credit ───────────────
+BEGIN;
+DO $$
+DECLARE
+  v_def TEXT;
+BEGIN
+  v_def := pg_get_functiondef('public._try_match_krw_deposit(text,text,text,text)'::regprocedure);
+
+  ASSERT v_def LIKE '%WHERE reference_code = p_reference_code%'
+     AND v_def LIKE '%AND status = ''pending''%'
+     AND v_def LIKE '%FOR UPDATE%',
+    '_try_match_krw_deposit must lock the pending deposit request with FOR UPDATE before matching';
+
+  RAISE NOTICE 'KRW DEPOSIT MATCH LOCK OK — pending request SELECT uses FOR UPDATE';
+END;
+$$;
+ROLLBACK;
+
 -- ── Test 0: KRW deposit request rejects missing PHON/KRW rate ────────────────
 BEGIN;
 DO $$
@@ -110,6 +128,77 @@ BEGIN
     format('PHON balance must not double-credit on duplicate transfer, %s vs %s', v_phon1, v_phon2);
 
   RAISE NOTICE 'DUPLICATE TRANSFER ID OK — idempotency blocks double PHON credit';
+END;
+$$;
+ROLLBACK;
+
+-- ── Test 1b: Different transfer_ids cannot match the same pending request twice ─
+BEGIN;
+DO $$
+DECLARE
+  v_uid          UUID := gen_random_uuid();
+  v_wallet_id    UUID;
+  v_ref          TEXT := 'REFONCE001';
+  v_amount_krw   TEXT := '10000';
+  v_expected_phon TEXT := '100.000000';
+  v_res1         JSONB;
+  v_res2         JSONB;
+  v_phon_before  NUMERIC;
+  v_phon_first   NUMERIC;
+  v_phon_second  NUMERIC;
+  v_first_delta  NUMERIC;
+  v_second_delta NUMERIC;
+  v_status       TEXT;
+BEGIN
+  INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
+  VALUES (v_uid, 'authenticated', 'authenticated',
+          'dep_once_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+
+  UPDATE profiles SET legal_name = 'Kim Minsoo', kyc_tier = 'email_verified' WHERE id = v_uid;
+  SELECT id INTO v_wallet_id FROM wallets WHERE user_id = v_uid;
+
+  INSERT INTO missions (user_id, mission, phon_awarded, completed_at)
+  VALUES (v_uid, 'first_deposit', '0.000000', NOW());
+
+  INSERT INTO krw_deposit_requests (
+    user_id, wallet_id, reference_code, amount_krw, expected_phon, status
+  ) VALUES (
+    v_uid, v_wallet_id, v_ref, v_amount_krw, v_expected_phon, 'pending'
+  );
+
+  SELECT phon_available::NUMERIC INTO v_phon_before FROM wallets WHERE user_id = v_uid;
+
+  PERFORM set_config('request.jwt.claims', '{}', true);
+
+  v_res1 := rpc_process_bank_transfer(
+    'TXN-ONCE-001-A', v_amount_krw, 'Kim Minsoo', v_ref
+  );
+  ASSERT (v_res1->>'ok')::BOOLEAN, format('first transfer must match, got %s', v_res1);
+
+  SELECT phon_available::NUMERIC INTO v_phon_first FROM wallets WHERE user_id = v_uid;
+  v_first_delta := v_phon_first - v_phon_before;
+  ASSERT v_first_delta = v_expected_phon::NUMERIC,
+    format('first transfer must credit expected PHON delta, expected=%s got=%s',
+           v_expected_phon, v_first_delta);
+
+  SELECT status INTO v_status FROM krw_deposit_requests WHERE reference_code = v_ref;
+  ASSERT v_status = 'credited', format('first transfer must credit the request, got status=%s', v_status);
+
+  v_res2 := rpc_process_bank_transfer(
+    'TXN-ONCE-001-B', v_amount_krw, 'Kim Minsoo', v_ref
+  );
+  ASSERT NOT (v_res2->>'ok')::BOOLEAN,
+    format('second transfer against same reference must not match, got %s', v_res2);
+  ASSERT (v_res2->>'reason') = 'reference_not_found',
+    format('second transfer must see no pending request, got %s', v_res2);
+
+  SELECT phon_available::NUMERIC INTO v_phon_second FROM wallets WHERE user_id = v_uid;
+  v_second_delta := v_phon_second - v_phon_first;
+  ASSERT v_second_delta = 0,
+    format('second transfer must not add another PHON credit, second_delta=%s',
+           v_second_delta);
+
+  RAISE NOTICE 'DIFFERENT TRANSFER SAME PENDING OK — only the first match credits PHON';
 END;
 $$;
 ROLLBACK;

@@ -8,6 +8,7 @@ import { Route as overviewRoute } from './routes/overview';
 import { Route as queuesRoute } from './routes/queues';
 import { Route as auditRoute } from './routes/audit';
 import { Route as operationsRoute } from './routes/operations';
+import { Route as alertsRoute } from './routes/alerts';
 import { AuthProvider } from './contexts/auth-context';
 import { I18nProvider } from './lib/i18n';
 import { queryClient } from './lib/query';
@@ -16,6 +17,7 @@ import './theme.css';
 const routeTree = rootRoute.addChildren([
   loginRoute,
   overviewRoute,
+  alertsRoute,
   queuesRoute,
   auditRoute,
   operationsRoute,

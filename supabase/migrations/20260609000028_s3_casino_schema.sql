@@ -326,7 +326,7 @@ BEGIN
   -- Log seed reveal.
   INSERT INTO game_seed_reveals (round_id, server_seed)
   VALUES (v_bet.round_id, p_server_seed)
-  ON CONFLICT DO NOTHING;
+  ON CONFLICT (round_id) DO NOTHING;
 
   RETURN jsonb_build_object(
     'bet_id', p_bet_id,

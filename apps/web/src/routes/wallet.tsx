@@ -1,7 +1,8 @@
 import { createRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { toDecimal, toFixed } from '@phonara/money';
 import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
 import { useWallet } from '../hooks/use-wallet';
@@ -10,6 +11,7 @@ import { env } from '../lib/env';
 import { supabase } from '../lib/supabase';
 import { useT } from '../lib/i18n';
 import { translateError } from '../lib/translate-error';
+import { isPositiveDecimalInput, normalizeDecimalInput } from '../lib/money-input';
 import {
   Button,
   Card,
@@ -31,6 +33,12 @@ export const Route = createRoute({
 type DepositRequest = Tables<'krw_deposit_requests'>;
 type WithdrawalRequest = Tables<'withdrawal_requests'>;
 type KycSubmission = Tables<'kyc_submissions'>;
+type ExchangeRateSnapshot = Tables<'exchange_rate_snapshots'>;
+
+function newRequestId(): string {
+  const c = globalThis.crypto;
+  return c?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString();
@@ -55,6 +63,11 @@ function WalletPage() {
   const [kycDocumentLast4, setKycDocumentLast4] = useState('');
   const [kycCountry, setKycCountry] = useState('KR');
   const [busy, setBusy] = useState(false);
+  const depositRequestIdRef = useRef<string | null>(null);
+  const depositInFlightRef = useRef(false);
+  const withdrawIdempotencyKeyRef = useRef<string | null>(null);
+  const withdrawClientRequestIdRef = useRef<string | null>(null);
+  const withdrawInFlightRef = useRef(false);
   const [lastDeposit, setLastDeposit] = useState<{
     reference_code: string;
     expected_phon: string | null;
@@ -128,10 +141,40 @@ function WalletPage() {
   const withdrawCurrency = 'PHON' as const;
   const withdrawFee = '0';
   const withdrawDestination = withdrawAddress.trim();
-  const withdrawAmountValid = /^\d+(\.\d+)?$/.test(withdrawAmount);
+  const withdrawAmountValid = isPositiveDecimalInput(withdrawAmount);
   const canRequestWithdraw = Boolean(
     withdrawAmountValid && withdrawDestination && !busy && kycVerified && !withdrawalPaused,
   );
+
+  const { data: activePhonKrwRate = null, isError: depositRateError } = useQuery({
+    queryKey: ['exchange-rate', 'PHON', 'KRW', 'active'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('exchange_rate_snapshots')
+        .select('id,base_currency,quote_currency,rate,captured_at,source,is_active,created_by')
+        .eq('base_currency', 'PHON')
+        .eq('quote_currency', 'KRW')
+        .eq('is_active', true)
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as ExchangeRateSnapshot | null;
+    },
+    staleTime: 30_000,
+  });
+
+  const depositPreviewPhon = useMemo(() => {
+    try {
+      if (!isPositiveDecimalInput(depositAmount) || !activePhonKrwRate?.rate) return null;
+      const rate = toDecimal(activePhonKrwRate.rate);
+      if (!rate.greaterThan(0)) return null;
+      return toFixed(toDecimal(depositAmount).div(rate), 'PHON');
+    } catch {
+      return null;
+    }
+  }, [activePhonKrwRate?.rate, depositAmount]);
+  const showDepositRateFallback = Boolean(depositAmount && !depositPreviewPhon && (depositRateError || !activePhonKrwRate));
 
   const depositTimeline = useMemo((): StatusTimelineItem[] => {
     const dep = lastDeposit
@@ -248,10 +291,11 @@ function WalletPage() {
   }, [kycSubmissions, t]);
 
   const handleDeposit = useCallback(async () => {
-    if (!depositAmount || busy) return;
+    if (!depositAmount || busy || depositInFlightRef.current) return;
+    const clientRequestId = depositRequestIdRef.current ?? (depositRequestIdRef.current = newRequestId());
+    depositInFlightRef.current = true;
     setBusy(true);
     try {
-      const clientRequestId = crypto.randomUUID();
       const { data, error } = await supabase.rpc('rpc_create_krw_deposit_request', {
         p_amount_krw: depositAmount,
         p_client_request_id: clientRequestId,
@@ -276,6 +320,8 @@ function WalletPage() {
       toast.error(t(translateError(err)));
     } finally {
       setBusy(false);
+      depositInFlightRef.current = false;
+      depositRequestIdRef.current = null;
     }
   }, [busy, depositAmount, qc, t, userId]);
 
@@ -285,20 +331,31 @@ function WalletPage() {
       toast.error(t('wallet.withdraw.unavailableToast'));
       return;
     }
+    withdrawIdempotencyKeyRef.current ??= newRequestId().replace(/-/g, '').slice(0, 24);
+    withdrawClientRequestIdRef.current ??= newRequestId();
     setWithdrawConfirmOpen(true);
   }, [busy, kycVerified, t, withdrawalPaused, withdrawAmountValid, withdrawDestination]);
 
+  const closeWithdrawConfirm = useCallback(() => {
+    if (withdrawInFlightRef.current) return;
+    withdrawIdempotencyKeyRef.current = null;
+    withdrawClientRequestIdRef.current = null;
+    setWithdrawConfirmOpen(false);
+  }, []);
+
   const handleWithdraw = useCallback(async () => {
-    if (!canRequestWithdraw) return;
+    if (!canRequestWithdraw || withdrawInFlightRef.current) return;
+    const idem = withdrawIdempotencyKeyRef.current ?? (withdrawIdempotencyKeyRef.current = newRequestId().replace(/-/g, '').slice(0, 24));
+    const clientRequestId = withdrawClientRequestIdRef.current ?? (withdrawClientRequestIdRef.current = newRequestId());
+    withdrawInFlightRef.current = true;
     setBusy(true);
     try {
-      const idem = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
       const { error } = await supabase.rpc('rpc_request_withdrawal', {
         p_currency: withdrawCurrency,
         p_amount: withdrawAmount,
         p_destination: { address: withdrawDestination, currency: withdrawCurrency },
         p_idempotency_key: idem,
-        p_client_request_id: crypto.randomUUID(),
+        p_client_request_id: clientRequestId,
       });
       if (error) throw error;
       toast.success(t('wallet.withdraw.success'));
@@ -311,6 +368,9 @@ function WalletPage() {
       toast.error(t(translateError(err)));
     } finally {
       setBusy(false);
+      withdrawInFlightRef.current = false;
+      withdrawIdempotencyKeyRef.current = null;
+      withdrawClientRequestIdRef.current = null;
     }
   }, [canRequestWithdraw, qc, t, userId, withdrawAmount, withdrawDestination]);
 
@@ -416,8 +476,17 @@ function WalletPage() {
                 data-testid="wallet-deposit-amount"
                 inputMode="numeric"
                 value={depositAmount}
-                onChange={(e) => setDepositAmount(e.target.value.replace(/[^\d]/g, ''))}
+                onChange={(e) => setDepositAmount(normalizeDecimalInput(e.target.value, { allowDecimal: false }))}
               />
+              {depositPreviewPhon ? (
+                <p className="text-xs text-muted" data-testid="wallet-deposit-preview">
+                  {t('wallet.deposit.previewRate')}: {formatMoney(depositPreviewPhon, 'PHON')} PHON
+                </p>
+              ) : showDepositRateFallback ? (
+                <p className="text-xs text-muted" data-testid="wallet-deposit-rate-fallback">
+                  {t('wallet.deposit.rateFallback')}
+                </p>
+              ) : null}
               <Button
                 data-testid="wallet-deposit-submit"
                 disabled={busy || !depositAmount}
@@ -478,7 +547,7 @@ function WalletPage() {
                   data-testid="wallet-withdraw-amount"
                   inputMode="decimal"
                   value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  onChange={(e) => setWithdrawAmount(normalizeDecimalInput(e.target.value))}
                 />
                 <label className="text-sm text-muted" htmlFor="withdraw-address">
                   {t('wallet.withdraw.addressLabel')}
@@ -600,7 +669,7 @@ function WalletPage() {
               busy={busy}
               testId="wallet-withdraw"
               onConfirm={() => void handleWithdraw()}
-              onCancel={() => setWithdrawConfirmOpen(false)}
+              onCancel={closeWithdrawConfirm}
             />
           </section>
         )}

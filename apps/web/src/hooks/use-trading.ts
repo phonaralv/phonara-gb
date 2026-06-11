@@ -6,6 +6,7 @@ import type { MessageKey } from '@phonara/i18n';
 import { useAuth } from '../contexts/auth-context';
 import { useRealtime } from './use-realtime';
 import { translateError } from '../lib/translate-error';
+import { walletKeys } from './use-wallet';
 
 // Stable id for a single user intent. Rapid double-clicks share the same id
 // (the ref is held while a submit is in-flight) so the server dedups both the
@@ -21,6 +22,7 @@ export type SpotMarket = Tables<'spot_markets'>;
 export type StakingPosition = Tables<'staking_positions'>;
 export type StakingPool = Tables<'staking_pools'>;
 export type OraclePrice = Tables<'oracle_prices'>;
+export type MarketCircuitBreaker = Tables<'market_circuit_breakers'>;
 
 export interface TradingCandle {
   time: number;
@@ -145,15 +147,23 @@ export function usePrices() {
   const { data, isError, error, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: tradingKeys.prices(),
     queryFn: async () => {
-      const { data, error: e } = await supabase.from('oracle_prices').select('symbol, price, updated_at');
-      if (e) throw e;
+      const [{ data: priceRows, error: priceError }, { data: circuitRows, error: circuitError }] = await Promise.all([
+        supabase.from('oracle_prices').select('symbol, price, updated_at'),
+        supabase.from('market_circuit_breakers').select('symbol, staleness_seconds'),
+      ]);
+      if (priceError) throw priceError;
+      if (circuitError) throw circuitError;
       const prices: Record<string, string> = {};
       const updatedAt: Record<string, string> = {};
-      for (const row of data ?? []) {
+      const stalenessSeconds: Record<string, number> = {};
+      for (const row of circuitRows ?? []) {
+        stalenessSeconds[row.symbol] = row.staleness_seconds;
+      }
+      for (const row of priceRows ?? []) {
         prices[row.symbol] = row.price;
         updatedAt[row.symbol] = row.updated_at;
       }
-      return { prices, updatedAt };
+      return { prices, updatedAt, stalenessSeconds };
     },
     // Realtime invalidation is primary; polling is a slow fallback.
     refetchInterval: 30_000,
@@ -161,11 +171,22 @@ export function usePrices() {
   });
   const prices = data?.prices ?? {};
   const oracleUpdatedAt = data?.updatedAt ?? {};
-  const oldestOracleUpdate = Object.values(oracleUpdatedAt).reduce((oldest, value) => {
-    const time = Date.parse(value);
-    return Number.isFinite(time) ? Math.min(oldest, time) : oldest;
-  }, Number.POSITIVE_INFINITY);
-  const oracleStale = oldestOracleUpdate !== Number.POSITIVE_INFINITY && Date.now() - oldestOracleUpdate > 30_000;
+  const stalenessSeconds = data?.stalenessSeconds ?? {};
+  const staleSymbols = Object.fromEntries(
+    Object.entries(oracleUpdatedAt).map(([symbol, value]) => {
+      const threshold = stalenessSeconds[symbol];
+      const time = Date.parse(value);
+      const stale = typeof threshold === 'number' && Number.isFinite(threshold) && Number.isFinite(time)
+        ? Date.now() - time > threshold * 1000
+        : false;
+      return [symbol, stale];
+    }),
+  );
+  const oracleStale = Object.values(staleSymbols).some(Boolean);
+  const isPriceStale = useCallback((symbol: string | null | undefined) => {
+    if (!symbol) return false;
+    return staleSymbols[symbol] === true;
+  }, [staleSymbols]);
 
   const qc = useQueryClient();
   const refresh = useCallback(() => {
@@ -177,7 +198,17 @@ export function usePrices() {
     invalidate: [tradingKeys.prices()],
   });
 
-  return { prices, refresh, isError, error, isFetching, dataUpdatedAt, refetch, oracleStale };
+  return {
+    prices,
+    refresh,
+    isError,
+    error,
+    isFetching,
+    dataUpdatedAt,
+    refetch,
+    oracleStale,
+    isPriceStale,
+  };
 }
 
 // ─── Futures positions ─────────────────────────────────────────
@@ -212,10 +243,16 @@ export function useFuturesPositions() {
 // ─── Futures actions ───────────────────────────────────────────
 
 export function useFuturesActions(onChange?: () => void) {
+  const { session } = useAuth();
+  const userId = session?.user.id ?? null;
+  const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   const [lastResult, setLastResult] = useState<Record<string, unknown> | null>(null);
   const openIdRef = useRef<string | null>(null);
+  const invalidateWallet = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: walletKeys.all(userId) });
+  }, [qc, userId]);
 
   const openPosition = useCallback(async (args: {
     market: string;
@@ -237,13 +274,14 @@ export function useFuturesActions(onChange?: () => void) {
       });
       if (e) throw e;
       setLastResult(data as Record<string, unknown>);
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) {
       setError(translateError(err));
       return null;
     } finally { setBusy(false); openIdRef.current = null; }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   const closePosition = useCallback(async (positionId: string) => {
     setBusy(true); setError(null);
@@ -253,13 +291,14 @@ export function useFuturesActions(onChange?: () => void) {
       });
       if (e) throw e;
       setLastResult(data as Record<string, unknown>);
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) {
       setError(translateError(err));
       return null;
     } finally { setBusy(false); }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   return { openPosition, closePosition, busy, error, lastResult };
 }
@@ -317,10 +356,16 @@ export function useTradingRiskAcknowledgement() {
 // ─── Spot actions ──────────────────────────────────────────────
 
 export function useSpotActions(onChange?: () => void) {
+  const { session } = useAuth();
+  const userId = session?.user.id ?? null;
+  const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   const buyIdRef = useRef<string | null>(null);
   const sellIdRef = useRef<string | null>(null);
+  const invalidateWallet = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: walletKeys.all(userId) });
+  }, [qc, userId]);
 
   const buy = useCallback(async (usdtSpent: string) => {
     const reqId = buyIdRef.current ?? (buyIdRef.current = newRequestId());
@@ -328,11 +373,12 @@ export function useSpotActions(onChange?: () => void) {
     try {
       const { data, error: e } = await supabase.rpc('rpc_spot_market_buy', { p_usdt_spent: usdtSpent, p_client_request_id: reqId });
       if (e) throw e;
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) { setError(translateError(err)); return null; }
     finally { setBusy(false); buyIdRef.current = null; }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   const sell = useCallback(async (phonSold: string) => {
     const reqId = sellIdRef.current ?? (sellIdRef.current = newRequestId());
@@ -340,11 +386,12 @@ export function useSpotActions(onChange?: () => void) {
     try {
       const { data, error: e } = await supabase.rpc('rpc_spot_market_sell', { p_phon_sold: phonSold, p_client_request_id: reqId });
       if (e) throw e;
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) { setError(translateError(err)); return null; }
     finally { setBusy(false); sellIdRef.current = null; }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   return { buy, sell, busy, error };
 }
@@ -400,9 +447,15 @@ export function useStakingPositions() {
 }
 
 export function useStakingActions(onChange?: () => void) {
+  const { session } = useAuth();
+  const userId = session?.user.id ?? null;
+  const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   const stakeIdRef = useRef<string | null>(null);
+  const invalidateWallet = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: walletKeys.all(userId) });
+  }, [qc, userId]);
 
   const stake = useCallback(async (term: string, amount: string) => {
     const reqId = stakeIdRef.current ?? (stakeIdRef.current = newRequestId());
@@ -410,33 +463,36 @@ export function useStakingActions(onChange?: () => void) {
     try {
       const { data, error: e } = await supabase.rpc('rpc_stake_phon', { p_term: term, p_amount: amount, p_client_request_id: reqId });
       if (e) throw e;
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) { setError(translateError(err)); return null; }
     finally { setBusy(false); stakeIdRef.current = null; }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   const unstake = useCallback(async (positionId: string) => {
     setBusy(true); setError(null);
     try {
       const { data, error: e } = await supabase.rpc('rpc_unstake_phon', { p_position_id: positionId });
       if (e) throw e;
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) { setError(translateError(err)); return null; }
     finally { setBusy(false); }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   const claim = useCallback(async (positionId: string) => {
     setBusy(true); setError(null);
     try {
       const { data, error: e } = await supabase.rpc('rpc_claim_staking_reward', { p_position_id: positionId });
       if (e) throw e;
+      invalidateWallet();
       onChange?.();
       return data as Record<string, unknown>;
     } catch (err) { setError(translateError(err)); return null; }
     finally { setBusy(false); }
-  }, [onChange]);
+  }, [invalidateWallet, onChange]);
 
   return { stake, unstake, claim, busy, error };
 }

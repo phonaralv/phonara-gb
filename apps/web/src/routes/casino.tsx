@@ -1,11 +1,12 @@
 import { createRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Route as rootRoute } from './__root';
 import { useAuth } from '../contexts/auth-context';
 import { useWallet, walletKeys } from '../hooks/use-wallet';
 import { callRpc } from '../lib/rpc';
 import { translateError } from '../lib/translate-error';
+import { isPositiveDecimalInput, normalizeDecimalInput } from '../lib/money-input';
 import { supabase } from '../lib/supabase';
 import { useT } from '../lib/i18n';
 import {
@@ -71,6 +72,13 @@ interface RevealResponse {
   server_seed: string;
   server_seed_hash: string;
   result: Record<string, unknown>;
+}
+
+interface VerificationEvidence {
+  server_seed_hash: string;
+  server_seed: string;
+  result: Record<string, unknown>;
+  verification: VerifyResult;
 }
 
 interface RecentBet {
@@ -240,19 +248,22 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
   const [currency, setCurrency] = useState<Currency>('PHON');
   const [stake, setStake] = useState(GAME_BY_CODE[initialGame].defaultStake);
   const [selection, setSelection] = useState<Record<string, unknown>>(GAME_BY_CODE[initialGame].defaultSelection);
+  const [clientSeed, setClientSeed] = useState(() => randomHex());
+  const [clientSeedIsAuto, setClientSeedIsAuto] = useState(true);
   const [commitment, setCommitment] = useState<RoundCommitment | null>(null);
   const [bet, setBet] = useState<BetResponse | null>(null);
-  const [reveal, setReveal] = useState<RevealResponse | null>(null);
-  const [verification, setVerification] = useState<VerifyResult | null>(null);
+  const [verificationEvidence, setVerificationEvidence] = useState<VerificationEvidence | null>(null);
   const [recentBets, setRecentBets] = useState<RecentBet[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errorKey, setErrorKey] = useState<MessageKey | null>(null);
   const [toastKey, setToastKey] = useState<MessageKey | null>(null);
+  const betIdempotencyKeyRef = useRef<string | null>(null);
+  const betInFlightRef = useRef(false);
 
   const config = GAME_BY_CODE[gameCode];
   const available = currency === 'PHON' ? wallet?.phon_available : wallet?.usdt_available;
-  const canSubmit = Boolean(commitment && stake && Number(stake) > 0 && !busy);
+  const canSubmit = Boolean(commitment && isPositiveDecimalInput(stake) && !busy);
 
   useEffect(() => {
     if (!authLoading && !session) void navigate({ to: '/login' });
@@ -264,8 +275,7 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
     setSelection(GAME_BY_CODE[initialGame].defaultSelection);
     setCommitment(null);
     setBet(null);
-    setReveal(null);
-    setVerification(null);
+    setVerificationEvidence(null);
   }, [initialGame]);
 
   useEffect(() => {
@@ -289,22 +299,30 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
       {
         id: 'reveal',
         label: t('casino.timeline.reveal'),
-        description: verification ? t(verification.resultMatch ? 'casino.verify.match' : 'casino.verify.mismatch') : t('casino.timeline.waiting'),
-        state: verification ? (verification.resultMatch ? 'done' as const : 'error' as const) : 'pending' as const,
+        description: verificationEvidence
+          ? t(verificationEvidence.verification.resultMatch ? 'casino.verify.match' : 'casino.verify.mismatch')
+          : t('casino.timeline.waiting'),
+        state: verificationEvidence
+          ? (verificationEvidence.verification.resultMatch ? 'done' as const : 'error' as const)
+          : 'pending' as const,
       },
     ],
-    [bet, busy, commitment, t, verification],
+    [bet, busy, commitment, t, verificationEvidence],
   );
 
-  async function prepareRound(nextGame = gameCode) {
+  async function prepareRound(nextGame = gameCode, options: { preserveEvidence?: boolean } = {}) {
     setBusy(true);
     setErrorKey(null);
     setBet(null);
-    setReveal(null);
-    setVerification(null);
+    if (!options.preserveEvidence) {
+      setVerificationEvidence(null);
+    }
     try {
       const round = await callRpc('rpc_open_game_round', { p_game: nextGame }) as unknown as RoundCommitment;
       setCommitment(round);
+      if (clientSeedIsAuto) {
+        setClientSeed(randomHex());
+      }
       setToastKey('casino.toast.hashReady');
     } catch (error) {
       setErrorKey(errorToKey(error));
@@ -314,18 +332,20 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
   }
 
   async function submitBet() {
-    if (!commitment) return;
+    if (!commitment || betInFlightRef.current) return;
+    const idempotencyKey = betIdempotencyKeyRef.current ?? (betIdempotencyKeyRef.current = `casino:${randomHex()}`);
+    betInFlightRef.current = true;
     setBusy(true);
     setErrorKey(null);
+    setVerificationEvidence(null);
     try {
-      const clientSeed = randomHex();
       const placed = await callRpc('rpc_place_game_bet', {
         p_round_id: commitment.round_id,
         p_currency: currency,
         p_stake: stake,
         p_selection: selection as Json,
         p_client_seed: clientSeed,
-        p_idempotency_key: `casino:${crypto.randomUUID()}`,
+        p_idempotency_key: idempotencyKey,
       }) as unknown as BetResponse;
       const revealed = await callRpc('rpc_reveal_game_round', { p_round_id: commitment.round_id }) as unknown as RevealResponse;
       const verified = await verifyRound({
@@ -338,18 +358,30 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
         expectedResult: placed.result,
       });
       setBet(placed);
-      setReveal(revealed);
-      setVerification(verified);
+      setVerificationEvidence({
+        server_seed_hash: commitment.server_seed_hash,
+        server_seed: revealed.server_seed,
+        result: placed.result,
+        verification: verified,
+      });
       setConfirmOpen(false);
       setToastKey(placed.status === 'won' ? 'casino.toast.won' : 'casino.toast.settled');
       await queryClient.invalidateQueries({ queryKey: walletKeys.all(session?.user.id ?? null) });
       setRecentBets(await loadRecentBets());
-      await prepareRound(gameCode);
+      await prepareRound(gameCode, { preserveEvidence: true });
     } catch (error) {
       setErrorKey(errorToKey(error));
     } finally {
       setBusy(false);
+      betInFlightRef.current = false;
+      betIdempotencyKeyRef.current = null;
     }
+  }
+
+  function openBetConfirm() {
+    if (!canSubmit) return;
+    betIdempotencyKeyRef.current ??= `casino:${randomHex()}`;
+    setConfirmOpen(true);
   }
 
   function selectGame(next: GameCode) {
@@ -365,8 +397,15 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
     });
     setCommitment(null);
     setBet(null);
-    setReveal(null);
-    setVerification(null);
+    setVerificationEvidence(null);
+  }
+
+  function updateClientSeed(value: string) {
+    setClientSeed(value);
+    setClientSeedIsAuto(false);
+    setCommitment(null);
+    setBet(null);
+    setVerificationEvidence(null);
   }
 
   if (authLoading) {
@@ -423,7 +462,7 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
                   data-testid="casino-stake-input"
                   label={t('casino.stake')}
                   value={stake}
-                  onChange={(event) => setStake(event.target.value)}
+                  onChange={(event) => setStake(normalizeDecimalInput(event.target.value))}
                   currency={currency}
                   hint={
                     walletLoading
@@ -456,6 +495,19 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
                 ))}
               </div>
 
+              <label className="mt-4 flex flex-col gap-2">
+                <span className="text-sm font-medium text-fg">{t('casino.field.clientSeed')}</span>
+                <input
+                  className="rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg tabular-nums"
+                  data-testid="casino-client-seed-input"
+                  value={clientSeed}
+                  onChange={(event) => updateClientSeed(event.target.value)}
+                />
+                <span className="text-xs text-muted">
+                  {t(clientSeedIsAuto ? 'casino.field.clientSeedAutoHint' : 'casino.field.clientSeedManualHint')}
+                </span>
+              </label>
+
               <div className="mt-5 grid gap-3 md:grid-cols-3">
                 <MultiplierDisplay label={t('casino.hashStatus')} value={commitment ? t('casino.hashReady') : t('casino.hashMissing')} tone={commitment ? 'primary' : 'neutral'} />
                 <MultiplierDisplay label={t('casino.lastPayout')} value={bet ? `${formatMoney(bet.payout, currency)} ${currency}` : '-'} tone={bet?.status === 'won' ? 'up' : bet ? 'down' : 'neutral'} />
@@ -471,7 +523,7 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
                 >
                   {commitment ? t('casino.refreshHash') : t('casino.prepareHash')}
                 </Button>
-                <Button full data-testid="casino-place-bet" disabled={!canSubmit} onClick={() => setConfirmOpen(true)}>
+                <Button full data-testid="casino-place-bet" disabled={!canSubmit} onClick={openBetConfirm}>
                   {busy ? t('common.processing') : t('casino.placeBet')}
                 </Button>
               </div>
@@ -491,17 +543,21 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
                 data-testid="casino-fairness-verifier"
                 title={t('casino.verify.title')}
                 seedHashLabel={t('casino.verify.seedHash')}
-                seedHash={commitment?.server_seed_hash ?? t('casino.timeline.waiting')}
-                serverSeedLabel={reveal ? t('casino.verify.serverSeed') : undefined}
-                serverSeed={reveal?.server_seed}
-                resultLabel={bet ? t('casino.verify.result') : undefined}
-                result={bet ? JSON.stringify(bet.result) : undefined}
+                seedHash={verificationEvidence?.server_seed_hash ?? commitment?.server_seed_hash ?? t('casino.timeline.waiting')}
+                serverSeedLabel={verificationEvidence ? t('casino.verify.serverSeed') : undefined}
+                serverSeed={verificationEvidence?.server_seed}
+                resultLabel={verificationEvidence ? t('casino.verify.result') : undefined}
+                result={verificationEvidence ? JSON.stringify(verificationEvidence.result) : undefined}
                 statusLabel={
-                  verification
-                    ? t(verification.seedHashMatch && verification.resultMatch ? 'casino.verify.match' : 'casino.verify.mismatch')
+                  verificationEvidence
+                    ? t(
+                      verificationEvidence.verification.seedHashMatch && verificationEvidence.verification.resultMatch
+                        ? 'casino.verify.match'
+                        : 'casino.verify.mismatch',
+                    )
                     : t('casino.verify.pending')
                 }
-                verified={verification ? verification.seedHashMatch && verification.resultMatch === true : null}
+                verified={verificationEvidence ? verificationEvidence.verification.seedHashMatch && verificationEvidence.verification.resultMatch === true : null}
               />
               <StatusTimeline items={timeline} />
               {toastKey && <Toast tone="success" title={t(toastKey)} />}
@@ -536,13 +592,18 @@ function CasinoPage({ initialGame }: { initialGame: GameCode }) {
         rows={[
           { label: t('casino.confirm.game'), value: t(config.labelKey) },
           { label: t('casino.stake'), value: `${formatMoney(stake, currency)} ${currency}` },
+          { label: t('casino.field.clientSeed'), value: clientSeed.slice(0, 16) },
           { label: t('casino.verify.seedHash'), value: commitment?.server_seed_hash.slice(0, 16) ?? '-' },
         ]}
         confirmLabel={t('casino.placeBet')}
         cancelLabel={t('common.cancel')}
         busy={busy}
         onConfirm={() => void submitBet()}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={() => {
+          if (betInFlightRef.current) return;
+          betIdempotencyKeyRef.current = null;
+          setConfirmOpen(false);
+        }}
       />
     </div>
   );
@@ -597,7 +658,12 @@ function GameFieldControl({
         max={field.kind === 'number' ? field.max : undefined}
         step={field.kind === 'number' ? field.step : undefined}
         value={String(value)}
-        onChange={(event) => onChange(field.key, event.target.value)}
+        onChange={(event) => {
+          const next = field.kind === 'text' && field.inputMode === 'decimal'
+            ? normalizeDecimalInput(event.target.value)
+            : event.target.value;
+          onChange(field.key, next);
+        }}
       />
     </label>
   );

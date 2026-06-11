@@ -110,6 +110,7 @@ BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES (v_uid, 'authenticated', 'authenticated',
           'stake_idem_' || v_uid::TEXT || '@test.local', NOW(), NOW());
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET phon_available = '1000.000000' WHERE user_id = v_uid;
   UPDATE app_config SET value = 'false' WHERE key IN ('system_halt', 'system_readonly');
   UPDATE app_config SET value = 'true'

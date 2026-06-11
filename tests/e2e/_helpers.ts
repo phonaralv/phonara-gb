@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Page } from '@playwright/test';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Decimal from 'decimal.js';
@@ -190,6 +191,54 @@ export async function currencyTotals(admin: SupabaseClient): Promise<{ USDT: str
     if (s.currency === 'PHON') phon = phon.plus(s.balance);
   }
   return { USDT: usdt.toFixed(6), PHON: phon.toFixed(6) };
+}
+
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+export function fundE2EWallet(
+  userId: string,
+  balances: { phon?: string; usdt?: string },
+): void {
+  const assignments = [
+    balances.phon === undefined ? null : `phon_available = ${sqlLiteral(balances.phon)}`,
+    balances.usdt === undefined ? null : `usdt_available = ${sqlLiteral(balances.usdt)}`,
+  ].filter((value): value is string => value !== null);
+
+  if (assignments.length === 0) return;
+
+  const sql = `
+    BEGIN;
+    SELECT set_config('phonara.ledger_write', 'allowed', true);
+    UPDATE public.wallets
+       SET ${assignments.join(', ')}
+     WHERE user_id = ${sqlLiteral(userId)}
+    RETURNING user_id;
+    COMMIT;
+  `;
+  const result = spawnSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      'supabase_db_yocjhjsdwoijfdrehzoq',
+      'psql',
+      '-U',
+      'postgres',
+      '-d',
+      'postgres',
+      '-At',
+    ],
+    { input: sql, encoding: 'utf8' },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || 'fund wallet SQL failed');
+  }
+  if (!result.stdout.includes(userId)) {
+    throw new Error('fund wallet failed: 0 rows updated');
+  }
 }
 
 /** Canonical local-stack oracle prices used by E2E preflight (matches migration seeds). */

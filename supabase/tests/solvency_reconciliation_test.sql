@@ -82,10 +82,12 @@ BEGIN
   UPDATE app_config SET value = 'false' WHERE key = 'system_readonly';
 
   -- TAMPER: directly add balance without a ledger entry (simulates exploit/bug).
-  ALTER TABLE wallet_ledger DISABLE RULE wallet_ledger_no_update;
+  -- The wallet balance guard is intentionally bypassed here so this test keeps
+  -- exercising reconciliation's detection path rather than the prevention layer.
+  ALTER TABLE wallets DISABLE TRIGGER trg_00_wallets_balance_write_guard;
   UPDATE wallets SET phon_available = (phon_available::NUMERIC + 9999)::TEXT
    WHERE user_id = v_uid;
-  ALTER TABLE wallet_ledger ENABLE RULE wallet_ledger_no_update;
+  ALTER TABLE wallets ENABLE TRIGGER trg_00_wallets_balance_write_guard;
 
   -- Run reconciliation.
   PERFORM set_config('request.jwt.claims', '{}', true);

@@ -7,6 +7,7 @@ import {
   ANON_KEY,
   SUPABASE_URL,
   currencyTotals,
+  fundE2EWallet,
   type E2EAuth,
 } from './_helpers';
 
@@ -96,7 +97,7 @@ async function createSecondUser(admin: SupabaseClient): Promise<E2EAuth> {
     await new Promise<void>((resolve) => setTimeout(resolve, 200));
   }
 
-  await admin.from('wallets').update({ phon_available: '1000000.000000' }).eq('user_id', userId);
+  fundE2EWallet(userId, { phon: '1000000.000000' });
   await admin.from('user_consents').insert(
     ['terms_of_service', 'privacy_policy', 'risk_disclosure', 'age_verification'].map((doc_type) => ({
       user_id: userId,
@@ -236,7 +237,7 @@ test.describe('casino provably fair E2E', () => {
     await page.goto('/casino/dice');
     await expect(page.getByTestId('casino-fairness-verifier')).toBeVisible({ timeout: 15_000 });
 
-    await admin.from('wallets').update({ phon_available: '1000000.000000' }).eq('user_id', auth.userId);
+    fundE2EWallet(auth.userId, { phon: '1000000.000000' });
     await admin
       .from('app_config')
       .update({ value: 'true' })

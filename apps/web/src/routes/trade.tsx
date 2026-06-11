@@ -30,6 +30,7 @@ import {
 import { formatMoney, ConfirmDialog, Button, Card, Stat, Badge, Input, SegmentedControl, Slider, OrderBook, Skeleton } from '@phonara/ui';
 import { toDecimal } from '@phonara/money';
 import { isPositiveAmount, isNegativeAmount } from '../lib/money-display';
+import { normalizeDecimalInput } from '../lib/money-input';
 import { useT } from '../lib/i18n';
 
 export const Route = createRoute({
@@ -52,6 +53,7 @@ function TradePage() {
     dataUpdatedAt: pricesUpdatedAt,
     refetch: refetchPrices,
     oracleStale,
+    isPriceStale,
   } = usePrices();
   const { markets: futuresMarkets, loading: futuresMarketsLoading, isError: futuresMarketsError } = useFuturesMarkets();
   const { markets: spotMarkets, isError: spotMarketsError } = useSpotMarkets();
@@ -135,6 +137,7 @@ function TradePage() {
             phonAvail={wallet?.phon_available ?? '0'}
             usdtAvail={wallet?.usdt_available ?? '0'}
             walletLoading={walletLoading}
+            isPriceStale={isPriceStale}
             onTraded={refresh}
           />
           <SpotPanel
@@ -142,10 +145,11 @@ function TradePage() {
             price={selectedSpotMarket ? (prices[selectedSpotMarket.symbol] ?? '0') : '0'}
             usdtAvail={wallet?.usdt_available ?? '0'}
             phonAvail={wallet?.phon_available ?? '0'}
+            priceStale={selectedSpotMarket ? isPriceStale(selectedSpotMarket.symbol) : false}
           />
         </section>
 
-        <OpenPositions positions={positions} prices={prices} onClosed={refresh} />
+        <OpenPositions positions={positions} prices={prices} isPriceStale={isPriceStale} onClosed={refresh} />
       </div>
     </div>
   );
@@ -330,7 +334,7 @@ function TradeNotificationCenter({
                 inputMode="decimal"
                 data-testid="price-alert-target"
                 placeholder={t('notif.priceAlert.targetPlaceholder')}
-                onChange={(event) => setTarget(event.target.value)}
+                onChange={(event) => setTarget(normalizeDecimalInput(event.target.value))}
               />
               <Button
                 size="sm"
@@ -391,7 +395,7 @@ function TradeNotificationCenter({
 // ─── Futures order panel ───────────────────────────────────────
 
 function FuturesPanel({
-  markets, marketsLoading, prices, phonAvail, usdtAvail, walletLoading, onTraded,
+  markets, marketsLoading, prices, phonAvail, usdtAvail, walletLoading, isPriceStale, onTraded,
 }: {
   markets: FuturesMarket[];
   marketsLoading: boolean;
@@ -399,6 +403,7 @@ function FuturesPanel({
   phonAvail: string;
   usdtAvail: string;
   walletLoading: boolean;
+  isPriceStale: (symbol: string | null | undefined) => boolean;
   onTraded: () => void;
 }) {
   const t = useT();
@@ -413,6 +418,7 @@ function FuturesPanel({
 
   const market = markets[marketIdx] ?? markets[0] ?? null;
   const price = market ? (prices[market.symbol] ?? '0') : '0';
+  const priceStale = market ? isPriceStale(market.symbol) : false;
   const maxLeverage = market?.max_leverage ?? '1';
   const highLeverageThreshold = useMemo(() => {
     try {
@@ -431,6 +437,7 @@ function FuturesPanel({
   }, [highLeverageThreshold, leverage]);
   const { candles, loading: candlesLoading, isError: candlesError, refetch: refetchCandles } = useCandles(market?.symbol ?? null, '1m');
   const syntheticBook = useSyntheticBook(market?.symbol ?? null);
+  const staleReason = t('trade.dataStatus.staleDescription');
 
   useEffect(() => {
     if (marketIdx >= markets.length) setMarketIdx(0);
@@ -447,7 +454,7 @@ function FuturesPanel({
   }, [leverage, maxLeverage]);
 
   async function submitOpen() {
-    if (!market) return;
+    if (!market || priceStale) return;
     await openPosition({ market: market.symbol, side, marginCurrency, marginAmount: margin, leverage });
     setConfirmOpen(false);
   }
@@ -578,7 +585,12 @@ function FuturesPanel({
 
       <div className="field-row">
         <label>{t('trade.marginWith', { currency: marginCurrency })}</label>
-        <Input inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)} className="flex-1 min-w-0 text-right" />
+        <Input
+          inputMode="decimal"
+          value={margin}
+          onChange={e => setMargin(normalizeDecimalInput(e.target.value))}
+          className="flex-1 min-w-0 text-right"
+        />
       </div>
       <div className="field-hint">{t('wallet.available')}: {formatMoney(avail, marginCurrency)}</div>
 
@@ -629,15 +641,17 @@ function FuturesPanel({
       {error && <p className="card-error">{t(error)}</p>}
       {riskAck.error && <p className="card-error">{t(riskAck.error)}</p>}
 
-      <Button
-        variant={side === 'long' ? 'success' : 'danger'}
-        full
-        data-testid="futures-open"
-        disabled={busy || walletLoading || !preview || (isHighLeverage && !riskAck.acknowledged)}
-        onClick={() => setConfirmOpen(true)}
-      >
-        {busy ? t('common.processing') : t(side === 'long' ? 'trade.openLongPosition' : 'trade.openShortPosition')}
-      </Button>
+      <span className="block" title={priceStale ? staleReason : undefined}>
+        <Button
+          variant={side === 'long' ? 'success' : 'danger'}
+          full
+          data-testid="futures-open"
+          disabled={busy || walletLoading || !preview || priceStale || (isHighLeverage && !riskAck.acknowledged)}
+          onClick={() => setConfirmOpen(true)}
+        >
+          {busy ? t('common.processing') : t(side === 'long' ? 'trade.openLongPosition' : 'trade.openShortPosition')}
+        </Button>
+      </span>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -668,12 +682,13 @@ function FuturesPanel({
 // ─── Spot panel ────────────────────────────────────────────────
 
 function SpotPanel({
-  market, price, usdtAvail, phonAvail,
+  market, price, usdtAvail, phonAvail, priceStale,
 }: {
   market: SpotMarket | null;
   price: string;
   usdtAvail: string;
   phonAvail: string;
+  priceStale: boolean;
 }) {
   const t = useT();
   const [tab, setTab] = useState<'buy' | 'sell'>('buy');
@@ -681,6 +696,7 @@ function SpotPanel({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { buy, sell, busy, error } = useSpotActions();
   const [msg, setMsg] = useState<string | null>(null);
+  const staleReason = t('trade.dataStatus.staleDescription');
 
   // Estimate via the canonical Decimal spot engine (matches the SQL settlement
   // exactly: same 0.1% fee + 6dp truncation), never JS float arithmetic.
@@ -696,6 +712,7 @@ function SpotPanel({
   }, [amount, tab, price]);
 
   async function submit() {
+    if (priceStale) return;
     setMsg(null);
     const r = tab === 'buy' ? await buy(amount) : await sell(amount);
     setConfirmOpen(false);
@@ -724,7 +741,12 @@ function SpotPanel({
 
       <div className="field-row">
         <label>{tab === 'buy' ? t('trade.payUsdt') : t('trade.sellPhonLabel')}</label>
-        <Input inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} className="flex-1 min-w-0 text-right" />
+        <Input
+          inputMode="decimal"
+          value={amount}
+          onChange={e => setAmount(normalizeDecimalInput(e.target.value))}
+          className="flex-1 min-w-0 text-right"
+        />
       </div>
       <div className="field-hint">
         {t('wallet.available')}: {tab === 'buy'
@@ -742,15 +764,17 @@ function SpotPanel({
       {error && <p className="card-error">{t(error)}</p>}
       {msg && <p className="trade-success">{msg}</p>}
 
-      <Button
-        variant={tab === 'buy' ? 'success' : 'danger'}
-        full
-        data-testid="spot-submit"
-        disabled={busy || !estimate}
-        onClick={() => setConfirmOpen(true)}
-      >
-        {busy ? t('common.processing') : tab === 'buy' ? t('trade.buyPhon') : t('trade.sellPhonBtn')}
-      </Button>
+      <span className="block" title={priceStale ? staleReason : undefined}>
+        <Button
+          variant={tab === 'buy' ? 'success' : 'danger'}
+          full
+          data-testid="spot-submit"
+          disabled={busy || !estimate || priceStale}
+          onClick={() => setConfirmOpen(true)}
+        >
+          {busy ? t('common.processing') : tab === 'buy' ? t('trade.buyPhon') : t('trade.sellPhonBtn')}
+        </Button>
+      </span>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -782,10 +806,11 @@ function SpotPanel({
 // ─── Open positions ────────────────────────────────────────────
 
 function OpenPositions({
-  positions, prices, onClosed,
+  positions, prices, isPriceStale, onClosed,
 }: {
   positions: FuturesPosition[];
   prices: Record<string, string>;
+  isPriceStale: (symbol: string | null | undefined) => boolean;
   onClosed: () => void;
 }) {
   const t = useT();
@@ -793,6 +818,7 @@ function OpenPositions({
   const [closing, setClosing] = useState<FuturesPosition | null>(null);
   const open = positions.filter(p => p.status === 'open');
   const history = positions.filter(p => p.status !== 'open').slice(0, 10);
+  const staleReason = t('trade.dataStatus.staleDescription');
 
   const closingCcy = (closing?.margin_currency ?? 'USDT') as 'PHON' | 'USDT';
   const closingMark = closing ? (prices[closing.market] ?? closing.entry_price) : '0';
@@ -801,7 +827,7 @@ function OpenPositions({
     : '0';
 
   async function submitClose() {
-    if (!closing) return;
+    if (!closing || isPriceStale(closing.market)) return;
     await closePosition(closing.id);
     setClosing(null);
   }
@@ -817,6 +843,7 @@ function OpenPositions({
         const marginCcy = pos.margin_currency as 'PHON' | 'USDT';
         const uPnl = computePnl(pos.side, pos.quantity, pos.entry_price, mark, marginCcy);
         const pnlNegative = isNegativeAmount(uPnl);
+        const positionPriceStale = isPriceStale(pos.market);
         return (
           <Card key={pos.id} className="mb-3 flex flex-col gap-2.5 p-4">
             <div className="flex items-center gap-2">
@@ -832,9 +859,17 @@ function OpenPositions({
             <div className={`text-[0.95rem] font-bold ${pnlNegative ? 'text-down' : 'text-up'}`}>
               {t('trade.unrealizedPnl')}: {formatMoney(uPnl, marginCcy, { signed: true })} {pos.margin_currency}
             </div>
-            <Button variant="secondary" size="sm" data-testid="futures-close" disabled={busy} onClick={() => setClosing(pos)}>
-              {t('trade.closePositionBtn')}
-            </Button>
+            <span className="block" title={positionPriceStale ? staleReason : undefined}>
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="futures-close"
+                disabled={busy || positionPriceStale}
+                onClick={() => setClosing(pos)}
+              >
+                {t('trade.closePositionBtn')}
+              </Button>
+            </span>
           </Card>
         );
       })}

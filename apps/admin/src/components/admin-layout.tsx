@@ -6,12 +6,18 @@ import { Button } from '@phonara/ui';
 
 interface NavItem {
   to: string;
-  labelKey: 'admin.nav.overview' | 'admin.nav.queues' | 'admin.nav.audit' | 'admin.nav.operations';
+  labelKey:
+    | 'admin.nav.overview'
+    | 'admin.nav.alerts'
+    | 'admin.nav.queues'
+    | 'admin.nav.audit'
+    | 'admin.nav.operations';
   testId: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/overview', labelKey: 'admin.nav.overview', testId: 'nav-overview' },
+  { to: '/alerts', labelKey: 'admin.nav.alerts', testId: 'nav-alerts' },
   { to: '/queues', labelKey: 'admin.nav.queues', testId: 'nav-queues' },
   { to: '/audit', labelKey: 'admin.nav.audit', testId: 'nav-audit' },
   { to: '/operations', labelKey: 'admin.nav.operations', testId: 'nav-operations' },

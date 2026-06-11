@@ -28,6 +28,7 @@ BEGIN
     (v_admin, 'authenticated', 'authenticated', 'stage2_admin_' || v_admin::TEXT || '@t.local', NOW(), NOW()),
     (v_user,  'authenticated', 'authenticated', 'stage2_user_' || v_user::TEXT || '@t.local', NOW(), NOW());
   UPDATE profiles SET role = 'admin' WHERE id = v_admin;
+  PERFORM set_config('phonara.ledger_write', 'allowed', true);
   UPDATE wallets SET usdt_available = '1000000.000000', phon_available = '1000000.000000'
    WHERE user_id = v_user;
 

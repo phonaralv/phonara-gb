@@ -2412,6 +2412,54 @@ phonara-gb/
   - `bun run check:release` green.
 - **원격 변경**: 없음. 로컬 migration/test/doc만.
 
+### Admin Overview metadata UI
+- **무엇을**: `rpc_get_ops_health()`가 반환하는 `lastRunAt`, `lastSuccessfulAt`, `lastErrorAt` 등
+  check metadata를 Admin Overview 5카드에 보조 정보로 노출. RPC `summary`는 그대로 두고 UI는
+  metadata 라인만 추가해 운영자가 새벽에도 마지막 성공/실행/오류/증빙/작업 시각을 빠르게 확인.
+- **어떻게**:
+  - [`apps/admin/src/routes/overview.tsx`](../apps/admin/src/routes/overview.tsx): `OpsHealthCheck`에
+    optional timestamp 필드 파싱 추가(`parseOptionalTimestamp`). check id별 metadata 표시 순서 고정
+    (`reconciliation`: lastSuccessfulAt → lastRunAt; cron: lastRunAt → lastSuccessfulAt;
+    liquidation error: lastErrorAt; treasury: observedAt as oldest attestation; operator: observedAt
+    as last action). 값이 없는 optional metadata는 row를 숨기고, baseline `observedAt` fallback 유지.
+    polling 60초·수동 refresh·기존 Card/Badge/Skeleton/ErrorState 재사용.
+  - [`packages/i18n/src/index.ts`](../packages/i18n/src/index.ts): `admin.overview.meta.*` ko/en 5키
+    추가 (`lastSuccessfulAt`, `lastRunAt`, `lastErrorAt`, `oldestAttestation`, `lastAction`).
+- **오류/수정**: 없음.
+- **검증**: `bun run typecheck`, `bun run check:i18n`, `bun run check:release` green.
+- **원격 변경**: 없음. 로컬 UI/i18n만.
+
+### Ops health operational signals (3 check 확장)
+- **무엇을**: `rpc_get_ops_health()`에 hash-chain 무결성·예외 큐·treasury solvency 3개 check를
+  추가해 1인 운영자가 핵심 위험 신호를 놓치지 않도록 확장. 기존 6개 check id와 top-level 반환
+  구조는 유지, `system_overall`은 top-level `status`와 중복이라 추가하지 않음.
+- **어떻게**:
+  - [`supabase/migrations/20260611000060_ops_health_operational_signals.sql`](../supabase/migrations/20260611000060_ops_health_operational_signals.sql):
+    `rpc_get_ops_health()` 재정의. `hash_chain_integrity`는 `reconciliation_log`의
+    `hash_chain_wallet`/`hash_chain_system` 저장 결과만 읽음(verifier 미실행). broken > 0 →
+    `critical`; 24h stale success → `warning`. `pending_exceptions`는 `admin_review_queue` open
+    count 기준(`1-4` warning, `5+` critical; `overdue_count > 0`은 절대 `ok` 불가, `3+` overdue 또는
+    24h+ oldest overdue → `critical`). `treasury_solvency`는 `_assert_solvency_withdrawal_gate`와
+    동일 buffer/coverage 모델을 stored signal로 노출; currency 힌트만 summary에 포함, 금액/비율/user
+    id/payload 금지.
+  - [`supabase/tests/ops_health_test.sql`](../supabase/tests/ops_health_test.sql): check count 9,
+    hash-chain ok/critical/stale, pending ok/warning/critical/overdue 경계, treasury ok/breach/setup
+    케이스 추가.
+  - [`apps/admin/src/routes/overview.tsx`](../apps/admin/src/routes/overview.tsx): 기존 5카드 유지 +
+    `CombinedHealthCard` 기반 `Risk Signals` 6번째 카드 추가. sub-check 순서:
+    `hash_chain_integrity` → `pending_exceptions` → `treasury_solvency`. check id별 metadata label
+    config 확장(`oldestOpen`, `oldestOverdue`).
+  - [`packages/i18n/src/index.ts`](../packages/i18n/src/index.ts): `admin.overview.card.riskSignals`,
+    sub-check label, metadata ko/en 키 추가.
+- **오류/수정**: SQL 테스트에서 wallet UPDATE가 `id = v_user`로 실패(`wallets.user_id` 컬럼).
+    `user_id`로 수정. unconfigured reserve 테스트는 PHON breach 잔존으로 mixed summary가 발생해
+    PHON/wallet 상태를 먼저 reset한 뒤 USDT-only setup assertion으로 분리.
+- **검증**:
+  - `supabase db reset` green — migration `000060` 적용.
+  - `bun run test:sql` green — 29/29 passed, `ops_health_test.sql` 포함.
+  - `bun run build:packages`, `bun run typecheck`, `bun run check:i18n`, `bun run check:release` green.
+- **원격 변경**: 없음. 로컬 migration/test/UI/i18n/doc만.
+
 ## 2026-06-11 — Auth Entry Pages 적용
 
 ### FOMO/프로모션 카피 정책 표현 완화

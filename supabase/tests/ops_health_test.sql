@@ -19,6 +19,8 @@ DECLARE
   v_success_at TIMESTAMPTZ;
   v_cron_jobid BIGINT;
   v_next_runid BIGINT;
+  v_entity UUID;
+  i INT;
 BEGIN
   INSERT INTO auth.users (id, aud, role, email, created_at, updated_at)
   VALUES
@@ -58,8 +60,8 @@ BEGIN
   v_res := rpc_get_ops_health();
   ASSERT v_res ? 'status' AND v_res ? 'lastUpdatedAt' AND v_res ? 'checks',
     'rpc_get_ops_health must return status, lastUpdatedAt, checks';
-  ASSERT jsonb_array_length(v_res->'checks') = 6,
-    format('rpc_get_ops_health must return 6 checks, got %s', jsonb_array_length(v_res->'checks'));
+  ASSERT jsonb_array_length(v_res->'checks') = 9,
+    format('rpc_get_ops_health must return 9 checks, got %s', jsonb_array_length(v_res->'checks'));
   ASSERT NOT EXISTS (
     SELECT 1
     FROM jsonb_array_elements(v_res->'checks') c
@@ -69,7 +71,10 @@ BEGIN
       'cron_liquidation_liveness',
       'liquidation_recent_error',
       'treasury_freshness',
-      'operator_high_risk_actions'
+      'operator_high_risk_actions',
+      'hash_chain_integrity',
+      'pending_exceptions',
+      'treasury_solvency'
     )
   ), 'rpc_get_ops_health returned an unknown check id';
 
@@ -260,6 +265,173 @@ BEGIN
     format('operator summary must include latest action category, got %s', v_check->>'summary');
   ASSERT v_check->>'summary' NOT LIKE '%' || v_user::TEXT || '%',
     'operator summary must not expose user ids';
+
+  -- hash_chain_integrity: clean stored rows -> ok
+  DELETE FROM reconciliation_log
+  WHERE check_type IN ('hash_chain_wallet', 'hash_chain_system');
+  v_run_at := NOW();
+  INSERT INTO reconciliation_log (run_at, check_type, is_match, broken_count, delta)
+  VALUES
+    (v_run_at, 'hash_chain_wallet', TRUE, 0, '0.000000'),
+    (v_run_at, 'hash_chain_system', TRUE, 0, '0.000000');
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'hash_chain_integrity';
+  ASSERT v_check->>'status' = 'ok',
+    format('clean hash-chain rows must be ok, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'Hash-chain integrity clean%',
+    format('hash-chain ok summary unexpected, got %s', v_check->>'summary');
+  ASSERT v_check ? 'lastRunAt' AND v_check ? 'lastSuccessfulAt',
+    'hash_chain_integrity must expose lastRunAt and lastSuccessfulAt metadata';
+
+  -- hash_chain_integrity: broken wallet row -> critical
+  DELETE FROM reconciliation_log
+  WHERE check_type IN ('hash_chain_wallet', 'hash_chain_system');
+  v_run_at := NOW();
+  INSERT INTO reconciliation_log (run_at, check_type, is_match, broken_count, delta, triggered_halt)
+  VALUES
+    (v_run_at, 'hash_chain_wallet', FALSE, 2, '0.000000', TRUE),
+    (v_run_at, 'hash_chain_system', TRUE, 0, '0.000000', FALSE);
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'hash_chain_integrity';
+  ASSERT v_check->>'status' = 'critical',
+    format('broken hash-chain must be critical, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'Hash-chain damage detected (wallet: 2%',
+    format('hash-chain critical summary unexpected, got %s', v_check->>'summary');
+
+  -- hash_chain_integrity: stale success -> warning
+  DELETE FROM reconciliation_log
+  WHERE check_type IN ('hash_chain_wallet', 'hash_chain_system');
+  v_success_at := NOW() - INTERVAL '25 hours';
+  INSERT INTO reconciliation_log (run_at, check_type, is_match, broken_count, delta)
+  VALUES
+    (v_success_at, 'hash_chain_wallet', TRUE, 0, '0.000000'),
+    (v_success_at, 'hash_chain_system', TRUE, 0, '0.000000');
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'hash_chain_integrity';
+  ASSERT v_check->>'status' = 'warning',
+    format('stale hash-chain success must be warning, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'Hash-chain check stale%',
+    format('hash-chain stale summary unexpected, got %s', v_check->>'summary');
+
+  -- pending_exceptions: none -> ok
+  DELETE FROM admin_review_queue;
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'pending_exceptions';
+  ASSERT v_check->>'status' = 'ok',
+    format('empty exception queue must be ok, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'No pending exceptions%',
+    format('pending_exceptions ok summary unexpected, got %s', v_check->>'summary');
+
+  -- pending_exceptions: 2 open -> warning
+  DELETE FROM admin_review_queue;
+  FOR i IN 1..2 LOOP
+    v_entity := gen_random_uuid();
+    INSERT INTO admin_review_queue (
+      queue_type, entity_type, entity_id, status, reason, sla_due_at
+    ) VALUES (
+      'deposit_exception', 'test_entity', v_entity, 'pending', 'test_reason',
+      NOW() + INTERVAL '2 hours'
+    );
+  END LOOP;
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'pending_exceptions';
+  ASSERT v_check->>'status' = 'warning',
+    format('2 pending exceptions must be warning, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE '2 pending exceptions require review%',
+    format('pending_exceptions warning summary unexpected, got %s', v_check->>'summary');
+
+  -- pending_exceptions: 5 open -> critical
+  DELETE FROM admin_review_queue;
+  FOR i IN 1..5 LOOP
+    v_entity := gen_random_uuid();
+    INSERT INTO admin_review_queue (
+      queue_type, entity_type, entity_id, status, reason, sla_due_at
+    ) VALUES (
+      'deposit_exception', 'test_entity', v_entity, 'pending', 'test_reason',
+      NOW() + INTERVAL '2 hours'
+    );
+  END LOOP;
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'pending_exceptions';
+  ASSERT v_check->>'status' = 'critical',
+    format('5 pending exceptions must be critical, got %s', v_check);
+
+  -- pending_exceptions: overdue forces at least warning (never ok)
+  DELETE FROM admin_review_queue;
+  v_entity := gen_random_uuid();
+  INSERT INTO admin_review_queue (
+    queue_type, entity_type, entity_id, status, reason, sla_due_at
+  ) VALUES (
+    'deposit_exception', 'test_entity', v_entity, 'pending', 'test_reason',
+    NOW() - INTERVAL '1 hour'
+  );
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'pending_exceptions';
+  ASSERT v_check->>'status' = 'warning',
+    format('overdue exception must not be ok, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE '%(1 overdue)%',
+    format('overdue count must appear in summary, got %s', v_check->>'summary');
+
+  -- pending_exceptions: 3 overdue -> critical
+  DELETE FROM admin_review_queue;
+  FOR i IN 1..3 LOOP
+    v_entity := gen_random_uuid();
+    INSERT INTO admin_review_queue (
+      queue_type, entity_type, entity_id, status, reason, sla_due_at
+    ) VALUES (
+      'deposit_exception', 'test_entity', v_entity, 'pending', 'test_reason',
+      NOW() - INTERVAL '2 hours'
+    );
+  END LOOP;
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'pending_exceptions';
+  ASSERT v_check->>'status' = 'critical',
+    format('3 overdue exceptions must be critical, got %s', v_check);
+
+  -- treasury_solvency: configured covered reserves -> ok
+  UPDATE treasury_reserves SET
+    real_balance = '1000000.000000',
+    updated_at = NOW();
+  DELETE FROM reconciliation_log;
+  v_run_at := NOW();
+  INSERT INTO reconciliation_log (run_at, check_type, currency, is_match, delta, wallet_sum, ledger_net)
+  VALUES
+    (v_run_at, 'wallet', 'PHON', TRUE, '0.000000', '0.000000', '0.000000'),
+    (v_run_at, 'wallet', 'USDT', TRUE, '0.000000', '0.000000', '0.000000'),
+    (v_run_at, 'wallet', 'KRW', TRUE, '0.000000', '0.000000', '0.000000');
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'treasury_solvency';
+  ASSERT v_check->>'status' = 'ok',
+    format('covered treasury reserves must be ok, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'Treasury solvency healthy%',
+    format('treasury_solvency ok summary unexpected, got %s', v_check->>'summary');
+
+  -- treasury_solvency: coverage breach -> critical
+  UPDATE treasury_reserves SET real_balance = '100.000000', buffer_pct = 10, updated_at = NOW()
+  WHERE currency = 'PHON';
+  UPDATE wallets SET phon_available = '95.000000', phon_locked = '0.000000'
+  WHERE user_id = v_user;
+  ASSERT FOUND, 'test user wallet must exist for treasury solvency breach case';
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'treasury_solvency';
+  ASSERT v_check->>'status' = 'critical',
+    format('treasury coverage breach must be critical, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'Treasury coverage needs review (PHON)%',
+    format('treasury_solvency breach summary unexpected, got %s', v_check->>'summary');
+
+  -- treasury_solvency: unconfigured reserve -> critical
+  UPDATE treasury_reserves SET real_balance = '1000000.000000', updated_at = NOW()
+  WHERE currency = 'PHON';
+  UPDATE wallets SET phon_available = '0.000000', phon_locked = '0.000000'
+  WHERE user_id = v_user;
+  UPDATE treasury_reserves SET real_balance = '0.000000', updated_at = NOW()
+  WHERE currency = 'USDT';
+  v_res := rpc_get_ops_health();
+  SELECT c INTO v_check FROM jsonb_array_elements(v_res->'checks') c WHERE c->>'id' = 'treasury_solvency';
+  ASSERT v_check->>'status' = 'critical',
+    format('unconfigured treasury reserve must be critical, got %s', v_check);
+  ASSERT v_check->>'summary' LIKE 'Treasury reserve needs setup (USDT)%',
+    format('treasury_solvency setup summary unexpected, got %s', v_check->>'summary');
 
   RAISE NOTICE 'OPS HEALTH OK — admin-only RPC, stale boundaries, and summary checks verified';
 END;

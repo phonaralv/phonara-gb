@@ -33,6 +33,9 @@ function OverviewPage() {
   const liquidationError = findCheck(checks, 'liquidation_recent_error');
   const treasuryFreshness = findCheck(checks, 'treasury_freshness');
   const operatorActions = findCheck(checks, 'operator_high_risk_actions');
+  const hashChainIntegrity = findCheck(checks, 'hash_chain_integrity');
+  const pendingExceptions = findCheck(checks, 'pending_exceptions');
+  const treasurySolvency = findCheck(checks, 'treasury_solvency');
 
   function refreshAll() {
     void refetch();
@@ -65,6 +68,7 @@ function OverviewPage() {
 
         {isLoading && (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+            <Skeleton className="h-40" />
             <Skeleton className="h-40" />
             <Skeleton className="h-40" />
             <Skeleton className="h-40" />
@@ -120,6 +124,11 @@ function OverviewPage() {
               check={treasuryFreshness}
               testId="ops-card-treasury"
             />
+            <CombinedHealthCard
+              title={t('admin.overview.card.riskSignals')}
+              checks={[hashChainIntegrity, pendingExceptions, treasurySolvency]}
+              testId="ops-card-risk-signals"
+            />
             <HealthCard
               title={t('admin.overview.card.operatorActions')}
               check={operatorActions}
@@ -140,14 +149,35 @@ type CheckId =
   | 'cron_liquidation_liveness'
   | 'liquidation_recent_error'
   | 'treasury_freshness'
-  | 'operator_high_risk_actions';
+  | 'operator_high_risk_actions'
+  | 'hash_chain_integrity'
+  | 'pending_exceptions'
+  | 'treasury_solvency';
+
+type MetadataField = 'lastSuccessfulAt' | 'lastRunAt' | 'lastErrorAt' | 'observedAt';
 
 interface OpsHealthCheck {
   id: CheckId;
   status: HealthStatus;
   summary: string;
   observedAt: string | null;
+  lastRunAt: string | null;
+  lastSuccessfulAt: string | null;
+  lastErrorAt: string | null;
   runbookKey: string;
+}
+
+interface MetadataConfig {
+  fields: MetadataField[];
+  observedLabelKey?: MessageKey;
+  lastRunLabelKey?: MessageKey;
+  lastErrorLabelKey?: MessageKey;
+}
+
+interface MetadataEntry {
+  labelKey: MessageKey;
+  value: string | null;
+  showWhenMissing: boolean;
 }
 
 interface OpsHealthResponse {
@@ -155,6 +185,30 @@ interface OpsHealthResponse {
   lastUpdatedAt: string;
   checks: OpsHealthCheck[];
 }
+
+const CHECK_METADATA_CONFIG: Partial<Record<CheckId, MetadataConfig>> = {
+  reconciliation_latest: { fields: ['lastSuccessfulAt', 'lastRunAt'] },
+  cron_liquidation_liveness: { fields: ['lastRunAt', 'lastSuccessfulAt'] },
+  liquidation_recent_error: { fields: ['lastErrorAt'] },
+  treasury_freshness: {
+    fields: ['observedAt'],
+    observedLabelKey: 'admin.overview.meta.oldestAttestation',
+  },
+  operator_high_risk_actions: {
+    fields: ['observedAt'],
+    observedLabelKey: 'admin.overview.meta.lastAction',
+  },
+  hash_chain_integrity: { fields: ['lastRunAt', 'lastSuccessfulAt', 'lastErrorAt'] },
+  pending_exceptions: {
+    fields: ['lastRunAt', 'lastErrorAt'],
+    lastRunLabelKey: 'admin.overview.meta.oldestOpen',
+    lastErrorLabelKey: 'admin.overview.meta.oldestOverdue',
+  },
+  treasury_solvency: {
+    fields: ['observedAt', 'lastSuccessfulAt'],
+    observedLabelKey: 'admin.overview.meta.oldestAttestation',
+  },
+};
 
 async function fetchOpsHealth(): Promise<OpsHealthResponse> {
   const { data, error } = await supabase.rpc('rpc_get_ops_health');
@@ -183,9 +237,19 @@ function parseCheck(value: Json): OpsHealthCheck | null {
     id,
     status: parseStatus(value['status']),
     summary: typeof value['summary'] === 'string' ? value['summary'] : '',
-    observedAt: typeof value['observedAt'] === 'string' ? value['observedAt'] : null,
+    observedAt: parseOptionalTimestamp(value['observedAt']),
+    lastRunAt: parseOptionalTimestamp(value['lastRunAt']),
+    lastSuccessfulAt: parseOptionalTimestamp(value['lastSuccessfulAt']),
+    lastErrorAt: parseOptionalTimestamp(value['lastErrorAt']),
     runbookKey: typeof value['runbookKey'] === 'string' ? value['runbookKey'] : '',
   };
+}
+
+function parseOptionalTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return value;
 }
 
 function isRecord(value: Json | unknown): value is Record<string, Json | undefined> {
@@ -203,7 +267,10 @@ function parseCheckId(value: unknown): CheckId | null {
     value === 'cron_liquidation_liveness' ||
     value === 'liquidation_recent_error' ||
     value === 'treasury_freshness' ||
-    value === 'operator_high_risk_actions'
+    value === 'operator_high_risk_actions' ||
+    value === 'hash_chain_integrity' ||
+    value === 'pending_exceptions' ||
+    value === 'treasury_solvency'
   ) {
     return value;
   }
@@ -212,6 +279,60 @@ function parseCheckId(value: unknown): CheckId | null {
 
 function findCheck(checks: OpsHealthCheck[], id: CheckId): OpsHealthCheck | undefined {
   return checks.find((check) => check.id === id);
+}
+
+function metadataLabelKey(field: MetadataField, config?: MetadataConfig): MessageKey {
+  if (field === 'observedAt') {
+    return config?.observedLabelKey ?? 'admin.overview.observedAt';
+  }
+  if (field === 'lastSuccessfulAt') return 'admin.overview.meta.lastSuccessfulAt';
+  if (field === 'lastRunAt') {
+    return config?.lastRunLabelKey ?? 'admin.overview.meta.lastRunAt';
+  }
+  return config?.lastErrorLabelKey ?? 'admin.overview.meta.lastErrorAt';
+}
+
+function getMetadataFieldValue(check: OpsHealthCheck, field: MetadataField): string | null {
+  return check[field];
+}
+
+function buildMetadataEntries(
+  check: OpsHealthCheck | undefined,
+  config: MetadataConfig | undefined,
+): MetadataEntry[] {
+  if (!check || !config) {
+    return [
+      {
+        labelKey: 'admin.overview.observedAt',
+        value: check?.observedAt ?? null,
+        showWhenMissing: true,
+      },
+    ];
+  }
+
+  const entries: MetadataEntry[] = [];
+
+  for (const field of config.fields) {
+    const value = getMetadataFieldValue(check, field);
+    const isObserved = field === 'observedAt';
+    if (value || isObserved) {
+      entries.push({
+        labelKey: metadataLabelKey(field, config),
+        value,
+        showWhenMissing: isObserved,
+      });
+    }
+  }
+
+  if (entries.length === 0 && !config.fields.includes('observedAt')) {
+    entries.push({
+      labelKey: 'admin.overview.observedAt',
+      value: check.observedAt,
+      showWhenMissing: true,
+    });
+  }
+
+  return entries;
 }
 
 function HealthCard({
@@ -296,14 +417,23 @@ function CardHeaderLine({
 
 function CheckMeta({ check }: { check: OpsHealthCheck | undefined }) {
   const t = useT();
+  const config = check ? CHECK_METADATA_CONFIG[check.id] : undefined;
+  const entries = buildMetadataEntries(check, config);
+
   return (
     <div className="mt-4 space-y-1 text-xs text-muted">
-      <p>
-        {t('admin.overview.observedAt')}:{' '}
-        <span className="tabular-nums">
-          {check?.observedAt ? formatDateTime(check.observedAt) : t('admin.overview.noObservedAt')}
-        </span>
-      </p>
+      {entries.map((entry) => (
+        <p key={entry.labelKey}>
+          {t(entry.labelKey)}:{' '}
+          <span className="tabular-nums">
+            {entry.value
+              ? formatDateTime(entry.value)
+              : entry.showWhenMissing
+                ? t('admin.overview.noObservedAt')
+                : null}
+          </span>
+        </p>
+      ))}
       {check?.runbookKey && (
         <p>
           {t('admin.overview.runbook')}: <span className="font-mono">{check.runbookKey}</span>
@@ -337,6 +467,9 @@ function checkLabelKey(id: CheckId): MessageKey {
   if (id === 'cron_liquidation_liveness') return 'admin.overview.check.cronLiveness';
   if (id === 'liquidation_recent_error') return 'admin.overview.check.liquidationError';
   if (id === 'treasury_freshness') return 'admin.overview.card.treasuryFreshness';
+  if (id === 'hash_chain_integrity') return 'admin.overview.check.hashChainIntegrity';
+  if (id === 'pending_exceptions') return 'admin.overview.check.pendingExceptions';
+  if (id === 'treasury_solvency') return 'admin.overview.check.treasurySolvency';
   return 'admin.overview.card.operatorActions';
 }
 

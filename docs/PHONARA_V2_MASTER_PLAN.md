@@ -4036,6 +4036,20 @@ phonara-gb/
 - **회귀 테스트**: [`anon_lockdown_test.sql`](../supabase/tests/anon_lockdown_test.sql) Test 1e — anon profiles SELECT/INSERT 차단, authenticated INSERT 차단, service_role INSERT/UPDATE 유지 proof.
 - **게이트**: `supabase db reset` green(000001~000055); `bun run test:sql` green(26/26); `bun run check:release` green; `bunx playwright test tests/e2e/quality.spec.ts --project=chromium` green(1/1, global setup 통과). 리모트 apply 0.
 
+### 2026-06-11 Supabase architecture hardening — GRANT/RLS inventory + reconciliation refactor + audit_logs trigger pilot (local)
+
+- **배경**: 000053~000055에서 RLS-only 변경 후 GRANT corrective migration(054b/055)이 연쇄 발생. v2 실행 계획에 따라 프로세스 gap 재발 방지 + reconciliation 내부 정리 + append-only RULE→trigger 파일럿을 local-only로 적용.
+- **053 incident recap**: `part_e_public_scope_hardening`(000053)은 RLS만 변경; `public_scope_hardening_test`는 행 필터만 검증. base table GRANT pairing test 부재 → `20260611000054_fix_table_grants_for_rls` + `20260611000055_profiles_wallets_table_grants` 후속. `20260609000054_is_admin_security_definer`는 별도 이슈(RLS policy evaluation). suffix `000054` 중복(`20260609` vs `20260611`) — apply order는 filename sort로 정상; 추적 혼란은 Build Log + [`SUPABASE_ACCESS_MATRIX.md`](SUPABASE_ACCESS_MATRIX.md) naming 규칙으로 문서화.
+- **무엇을/어떻게**:
+  - [`.cursor/rules/25-postgres-plpgsql.mdc`](../.cursor/rules/25-postgres-plpgsql.mdc) — RLS migration MUST include GRANT/REVOKE in same file + inventory test update rule.
+  - [`grants_rls_inventory_test.sql`](../supabase/tests/grants_rls_inventory_test.sql) — pins 000045/053–055 role/table privileges + RLS enabled on inventory tables.
+  - [`20260611000056_reconciliation_internal_refactor.sql`](../supabase/migrations/20260611000056_reconciliation_internal_refactor.sql) — `_recon_log_row` + `_recon_apply_halt` 2 helper extract; 5-check single-transaction behaviour unchanged.
+  - [`20260611000057_audit_logs_append_only_triggers.sql`](../supabase/migrations/20260611000057_audit_logs_append_only_triggers.sql) — Phase A: `audit_logs` RULE drop → `_ledger_deny_mutations` BEFORE UPDATE/DELETE trigger (raises `append_only_violation`).
+  - [`audit_logs_append_only_test.sql`](../supabase/tests/audit_logs_append_only_test.sql) — trigger pilot regression.
+  - [`RUNBOOK.md`](RUNBOOK.md) Scenario 1 — 5 `check_type` values + observability queries.
+  - [`SUPABASE_ACCESS_MATRIX.md`](SUPABASE_ACCESS_MATRIX.md) — table×role×GRANT×RLS reference.
+- **게이트**: `supabase db reset` clean(000001~000057); `bun run test:sql` **28/28** green; `bun run check:release` green. 리모트 apply 0.
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).

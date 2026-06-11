@@ -70,6 +70,19 @@ applied or the specific SQL branch executed. Treat every item as mandatory.
 - Internal system accounts may go negative for liveness; user wallets must never
   go negative — enforce with DB `CHECK` constraints, not just app logic.
 
+## RLS & table GRANT pairing (mandatory)
+
+- Any migration that `DROP`/`CREATE`/`ALTER` RLS policies on a client-facing
+  table MUST include the matching `GRANT`/`REVOKE` for `anon`, `authenticated`,
+  and (when needed) `service_role` in the **same migration file**. RLS filters
+  rows only after the role has base table access — policy-only changes without
+  GRANT cause PostgREST `insufficient_privilege` or silent over-exposure.
+- When adding or changing RLS on a table, update
+  `supabase/tests/grants_rls_inventory_test.sql` with the new expected
+  `has_table_privilege` snapshot for each affected role.
+- Pair every RLS scope change with a `SET ROLE anon|authenticated` integration
+  test (see `public_scope_hardening_test.sql`).
+
 ## RLS & auth in SQL tests
 
 - The `postgres` superuser bypasses RLS. Do not `SET ROLE authenticated` in

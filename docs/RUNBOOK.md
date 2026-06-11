@@ -11,25 +11,46 @@
 
 ## 🔴 Scenario 1: Reconciliation 불일치 → 자동 system_readonly
 
-**발동 조건**: `rpc_run_reconciliation()` (매일 02:00 UTC, pg_cron)이
-`|wallet_sum − ledger_net| > 0.000001` 감지 → `app_config.system_readonly = true` 자동 설정.
+**발동 조건**: `rpc_run_reconciliation()` (매일 02:00 UTC, pg_cron)이 아래 **5종 검사** 중
+하나라도 실패 → `app_config.system_readonly = true` 자동 설정.
+
+| check_type | 무엇을 검사하는가 |
+|------------|-------------------|
+| `wallet` | 통화별 Σ(user wallet balances) == wallet_ledger net |
+| `system` | 통화별 Σ(system_accounts.balance) == system_account_ledger net |
+| `global_zero` | 통화별 Σ(wallets + system) == 0 |
+| `hash_chain_wallet` | `verify_ledger_hash_chain()` broken count == 0 |
+| `hash_chain_system` | `verify_system_account_hash_chain()` broken count == 0 |
 
 **증상**: 유저가 "잠시 서비스 점검 중" 오류를 봄. 지갑 잔액 변경 RPC 전체 차단.
+(청산 RPC는 `system_readonly`와 무관하게 계속 동작.)
 
 **확인 쿼리**:
 ```sql
--- 1. 최신 reconciliation 결과 확인
-SELECT run_at, currency, wallet_sum, ledger_net, delta, triggered_halt
+-- 1. 최신 reconciliation 결과 (5 check types)
+SELECT run_at, check_type, currency, wallet_sum, ledger_net, delta,
+       broken_count, is_match, triggered_halt
   FROM reconciliation_log
- ORDER BY run_at DESC LIMIT 10;
+ ORDER BY run_at DESC, check_type
+ LIMIT 20;
 
 -- 2. 현재 시스템 상태 확인
 SELECT key, value FROM app_config WHERE key IN ('system_halt', 'system_readonly');
 
--- 3. 어느 통화에서 불일치가 발생했는지
-SELECT currency, wallet_sum, ledger_net, delta
+-- 3. 이번 run에서 실패한 검사만
+SELECT check_type, currency, wallet_sum, ledger_net, delta, broken_count
   FROM reconciliation_log
- WHERE is_match = FALSE ORDER BY run_at DESC LIMIT 5;
+ WHERE is_match = FALSE
+ ORDER BY run_at DESC
+ LIMIT 10;
+
+-- 4. hash-chain 실패 여부 (sum은 맞지만 tamper 가능)
+SELECT check_type, broken_count, triggered_halt
+  FROM reconciliation_log
+ WHERE check_type IN ('hash_chain_wallet', 'hash_chain_system')
+   AND is_match = FALSE
+ ORDER BY run_at DESC
+ LIMIT 5;
 ```
 
 **원인 가능성**:

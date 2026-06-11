@@ -115,8 +115,15 @@ jobs:
       - name: Export local Supabase E2E credentials
         run: |
           eval "$(supabase status -o env)"
+          # Supabase CLI exports SERVICE_ROLE_KEY on older releases and
+          # SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY on newer ones — accept all.
+          SRK="${SERVICE_ROLE_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-$SECRET_KEY}}"
+          if [ -z "$SRK" ]; then
+            echo "No local service role key from supabase status -o env" >&2
+            exit 1
+          fi
           {
-            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SRK"
             echo "VITE_SUPABASE_URL=http://127.0.0.1:54444"
             echo "VITE_SUPABASE_ANON_KEY=$ANON_KEY"
           } >> "$GITHUB_ENV"

@@ -20,33 +20,42 @@ const CONSENT_DOC_TYPES = [
 
 const FUTURES_SYMBOLS = ['PHONUSDT-PERP', 'BTCUSDT-SIM', 'ETHUSDT-SIM'];
 
-interface DbError {
-  code?: string;
-  message: string;
-}
+const FIXTURE_WAIT_MS = 15_000;
+const FIXTURE_POLL_MS = 200;
 
-function isDuplicateKey(error: DbError): boolean {
-  return error.code === '23505' || error.message.toLowerCase().includes('duplicate key');
-}
-
-async function insertIfMissing(
+async function waitForProfileAndWallet(
   admin: SupabaseClient,
-  table: 'profiles' | 'wallets',
-  row: Record<string, string>,
+  userId: string,
   label: string,
 ): Promise<void> {
-  const { error } = await admin.from(table).insert(row);
-  if (error && !isDuplicateKey(error)) {
-    throw new Error(`${label} fixture insert failed: ${error.message}`);
-  }
-}
+  // Production signup creates these rows via SECURITY DEFINER triggers
+  // (auth.users -> profiles -> wallets). E2E must not INSERT directly into
+  // client-closed tables; poll with the service-role reader instead.
+  const attempts = Math.ceil(FIXTURE_WAIT_MS / FIXTURE_POLL_MS);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const { data: profile, error: profileErr } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+    if (profileErr) throw new Error(`${label} profile lookup failed: ${profileErr.message}`);
 
-async function ensureProfileAndWallet(admin: SupabaseClient, userId: string, label: string): Promise<void> {
-  // The production trigger chain should create these rows. CI can occasionally
-  // observe missing fixture rows, so the service-role setup makes the invariant
-  // explicit and idempotent without changing product auth behavior.
-  await insertIfMissing(admin, 'profiles', { id: userId }, `${label} profile`);
-  await insertIfMissing(admin, 'wallets', { user_id: userId }, `${label} wallet`);
+    const { data: wallet, error: walletErr } = await admin
+      .from('wallets')
+      .select('user_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (walletErr) throw new Error(`${label} wallet lookup failed: ${walletErr.message}`);
+
+    if (profile && wallet) return;
+    if (attempt < attempts) {
+      await new Promise<void>((resolve) => setTimeout(resolve, FIXTURE_POLL_MS));
+    }
+  }
+
+  throw new Error(
+    `${label} profile/wallet not created by handle_new_user trigger within ${FIXTURE_WAIT_MS / 1000} s`,
+  );
 }
 
 /**
@@ -67,7 +76,7 @@ async function globalSetup(): Promise<void> {
   if (cErr || !created.user) throw new Error(`createUser failed: ${cErr?.message ?? 'no user'}`);
   const userId = created.user.id;
 
-  await ensureProfileAndWallet(admin, userId, 'user');
+  await waitForProfileAndWallet(admin, userId, 'user');
 
   // Fund the auto-created wallet generously.
   const { data: funded, error: wErr } = await admin
@@ -150,7 +159,7 @@ async function globalSetup(): Promise<void> {
   }
   const adminUserId = adminCreated.user.id;
 
-  await ensureProfileAndWallet(admin, adminUserId, 'admin');
+  await waitForProfileAndWallet(admin, adminUserId, 'admin');
 
   // Promote to admin role.
   const { error: roleErr } = await admin

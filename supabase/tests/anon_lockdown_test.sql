@@ -153,6 +153,26 @@ BEGIN
 END;
 $$;
 
+-- ── Test 1e: profiles/wallets table grants (000055) ─────────────────────────
+DO $$
+BEGIN
+  ASSERT NOT has_table_privilege('anon', 'public.profiles', 'SELECT'),
+    'anon must not have direct SELECT on profiles';
+  ASSERT NOT has_table_privilege('anon', 'public.profiles', 'INSERT'),
+    'anon must not INSERT into profiles';
+  ASSERT has_table_privilege('authenticated', 'public.profiles', 'SELECT'),
+    'authenticated must SELECT own profile rows under RLS';
+  ASSERT NOT has_table_privilege('authenticated', 'public.profiles', 'INSERT'),
+    'authenticated must not INSERT into profiles (trigger-only signup path)';
+  ASSERT has_table_privilege('service_role', 'public.profiles', 'INSERT'),
+    'service_role must INSERT into profiles for admin/E2E automation';
+  ASSERT has_table_privilege('service_role', 'public.wallets', 'UPDATE'),
+    'service_role must UPDATE wallets for admin/E2E funding';
+
+  RAISE NOTICE 'PROFILES/WALLETS GRANTS OK — clients closed; service_role retains automation access';
+END;
+$$;
+
 -- ── Test 1d: dead generic wallet mutators are fully removed ─────────────────
 DO $$
 BEGIN

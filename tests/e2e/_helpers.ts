@@ -10,8 +10,9 @@ import Decimal from 'decimal.js';
 export const SUPABASE_URL = process.env['VITE_SUPABASE_URL'] ?? 'http://127.0.0.1:54444';
 export const ANON_KEY =
   process.env['VITE_SUPABASE_ANON_KEY'] ?? 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
-export const SERVICE_ROLE_KEY =
-  process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? process.env['SUPABASE_SECRET_KEY'];
+export const SERVICE_ROLE_KEY = (
+  process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? process.env['SUPABASE_SECRET_KEY']
+)?.replace(/^['"]|['"]$/g, '');
 
 if (!SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY is required for E2E tests.');

@@ -4027,6 +4027,15 @@ phonara-gb/
 - **수정**: [`tests/e2e/global-setup.ts`](../tests/e2e/global-setup.ts)에 `ensureProfileAndWallet()`을 추가했다. `createUser` 직후 service-role fixture setup이 `profiles(id)`와 `wallets(user_id)`를 `insert if missing`으로 보장하고, trigger가 이미 생성한 duplicate key는 정상으로 무시한다. 이렇게 E2E 테스트 데이터 invariant를 명시적으로 만족시키되, 제품 signup/auth/RLS/RPC/ledger 로직은 변경하지 않는다.
 - **게이트**: `ReadLints` 0; `bun run typecheck` green; `bun run check:release` green; local Supabase service role env를 quote-trim해 주입한 `bunx playwright test tests/e2e/quality.spec.ts --project=chromium` green(1/1, global setup 통과).
 
+### 2026-06-11 CI E2E profiles permission denied fix (local)
+
+- **원인**: `ensureProfileAndWallet()`이 service-role PostgREST client로 `profiles`/`wallets`에 직접 `INSERT`했다. 이 에러는 RLS 정책 부재가 아니라 **테이블 GRANT** 문제다(`permission denied for table profiles`). Supabase `service_role`은 RLS를 bypass하지만 base table privilege가 없으면 INSERT가 거부된다. 제품 설계상 profiles/wallets INSERT는 `handle_new_user`/`create_wallet_for_profile` SECURITY DEFINER trigger 전용이므로, E2E fixture가 direct INSERT에 의존하는 것 자체가 잘못된 경로였다.
+- **수정 ①**: [`tests/e2e/global-setup.ts`](../tests/e2e/global-setup.ts)의 direct INSERT fallback을 제거하고 `waitForProfileAndWallet()` polling(15s)으로 교체 — trigger chain(`auth.users → profiles → wallets`) 결과를 service-role **SELECT**로 확인한다. [`tests/e2e/_helpers.ts`](../tests/e2e/_helpers.ts)는 service role env 값의 surrounding quotes를 trim한다.
+- **수정 ②**: 신규 [`20260611000055_profiles_wallets_table_grants.sql`](../supabase/migrations/20260611000055_profiles_wallets_table_grants.sql) — `anon`/`authenticated`에서 profiles/wallets direct INSERT·DELETE·TRUNCATE를 REVOKE하고, `service_role`에 명시적 SELECT/INSERT/UPDATE/DELETE GRANT를 부여(관리자 promote·E2E wallet funding·자동화 경로). RLS `service_role` 예외 정책은 추가하지 않았다(bypass로 충분).
+- **수정 ③**: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) E2E credential export가 `SERVICE_ROLE_KEY`/`SUPABASE_SERVICE_ROLE_KEY`/`SECRET_KEY` alias를 모두 수용하고 empty key면 fail-fast.
+- **회귀 테스트**: [`anon_lockdown_test.sql`](../supabase/tests/anon_lockdown_test.sql) Test 1e — anon profiles SELECT/INSERT 차단, authenticated INSERT 차단, service_role INSERT/UPDATE 유지 proof.
+- **게이트**: `supabase db reset` green(000001~000055); `bun run test:sql` green(26/26); `bun run check:release` green; `bunx playwright test tests/e2e/quality.spec.ts --project=chromium` green(1/1, global setup 통과). 리모트 apply 0.
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).

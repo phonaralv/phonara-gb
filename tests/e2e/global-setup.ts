@@ -43,7 +43,7 @@ async function globalSetup(): Promise<void> {
   // updates are the primary cause of the "wallet not visible" flakiness).
   {
     let found = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
+    for (let attempt = 0; attempt < 75; attempt++) {
       const { data } = await admin
         .from('wallets')
         .select('user_id')
@@ -52,7 +52,7 @@ async function globalSetup(): Promise<void> {
       if (data) { found = true; break; }
       await new Promise<void>((r) => setTimeout(r, 200));
     }
-    if (!found) throw new Error('wallet row not created by handle_new_user trigger within 6 s');
+    if (!found) throw new Error('wallet row not created by handle_new_user trigger within 15 s');
   }
 
   // Fund the auto-created wallet generously.
@@ -139,7 +139,7 @@ async function globalSetup(): Promise<void> {
   // Wait for handle_new_user trigger to create the profile row.
   {
     let found = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
+    for (let attempt = 0; attempt < 75; attempt++) {
       const { data } = await admin
         .from('profiles')
         .select('id')
@@ -148,7 +148,7 @@ async function globalSetup(): Promise<void> {
       if (data) { found = true; break; }
       await new Promise<void>((r) => setTimeout(r, 200));
     }
-    if (!found) throw new Error('admin profile row not created within 6 s');
+    if (!found) throw new Error('admin profile row not created within 15 s');
   }
 
   // Promote to admin role.

@@ -4015,6 +4015,12 @@ phonara-gb/
 - **수정**: [`anon_lockdown_test.sql`](../supabase/tests/anon_lockdown_test.sql)의 profiles 직접 read를 `EXCEPTION WHEN insufficient_privilege`로 감싸고, permission-denied 또는 RLS 0행 모두 “anon profiles 접근 차단”으로 인정하도록 보정했다. 같은 DO block 안에서 public `app_config.feature_withdrawal_enabled` read는 계속 성공해야 하므로 `_is_admin()` definer fix의 원래 목적은 유지된다.
 - **게이트**: `SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54442/postgres bun run test:sql` green(26/26); `supabase db reset --debug` 후 동일 SQL suite green(26/26); `bun run check:release` green.
 
+### 2026-06-11 CI E2E fixture timeout hardening (local)
+
+- **원인**: GitHub Actions의 Playwright global setup에서 `handle_new_user` trigger가 `profiles`/`wallets` row를 만들기 전 6초 polling window가 만료되어 `wallet row not created by handle_new_user trigger within 6 s`로 실패할 수 있었다. SQL trigger 자체 오류가 아니라 CI runner/resource variability에 취약한 fixture wait였다.
+- **수정**: [`tests/e2e/global-setup.ts`](../tests/e2e/global-setup.ts)의 일반 유저 wallet 대기와 admin profile 대기를 각각 30회×200ms(6초)에서 75회×200ms(15초)로 늘리고, 에러 메시지도 15초 기준으로 갱신했다. 제품 auth/RLS/RPC/ledger 로직은 변경하지 않았다.
+- **게이트**: `ReadLints` 0; `bun run check:release` green; `bun run typecheck` green; local Supabase service role env를 quote-trim해 주입한 `bunx playwright test tests/e2e/quality.spec.ts --project=chromium` green(1/1). 첫 로컬 E2E 재현은 stale port 3000 dev server로 실패했고, 두 번째는 PowerShell env parsing이 quote를 포함해 malformed JWT가 되어 실패했다. 포트 해제와 quote-trim 후 global setup + web/admin dev server + quality spec이 green.
+
 ## 다음 단계 (S1 계속 + S2~S3 병행)
 
 현재 완료: Critical 미션홀 봉인, High 미커밋파일 추적, Medium 청산 일원화, 문서 단일화(충돌 해소).
